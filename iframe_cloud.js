@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v2.2.0');
+  console.log('[iframe-cloud] Loading v2.3.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -33,9 +33,24 @@
       if (e.keyCode === 27 || e.keyCode === 8) { e.preventDefault(); e.stopPropagation(); closeOverlay(); }
     });
 
+    Lampa.Controller.add('iframe_cloud_overlay', {
+      toggle: function() {
+        Lampa.Controller.collectionSet(overlay);
+        Lampa.Controller.collectionFocus(closeBtn[0], overlay);
+      },
+      back: closeOverlay,
+      up: function() {},
+      down: function() {},
+      left: function() {},
+      right: function() {}
+    });
+
     overlay.append(loading).append(iframe).append(closeBtn).append(hint);
     $('body').append(overlay);
-    setTimeout(function() { closeBtn.focus(); }, 500);
+
+    setTimeout(function() {
+      Lampa.Controller.toggle('iframe_cloud_overlay');
+    }, 300);
   }
 
   function openPlugin(movie) {
@@ -70,7 +85,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.2.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.3.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -99,7 +114,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '2.2.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '2.3.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

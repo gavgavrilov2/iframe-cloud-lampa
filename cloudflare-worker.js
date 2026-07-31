@@ -55,26 +55,42 @@ export default {
   }
 };
 
+function decodeHtml(text) {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'");
+}
+
+function fixUrl(url) {
+  url = decodeHtml(url);
+  if (url.startsWith('http://')) url = 'https://' + url.substring(7);
+  return url;
+}
+
 function extractPlayers(html) {
   const players = [];
   let match;
 
   const regex1 = /class="cinemaplayer-item-select"[^>]*data-value="([^"]+)"[^>]*>([^<]*)/g;
   while ((match = regex1.exec(html)) !== null) {
-    players.push({ url: match[1], title: match[2].trim() });
+    players.push({ url: fixUrl(match[1]), title: decodeHtml(match[2].trim()) });
   }
 
   if (!players.length) {
     const regex2 = /data-value="([^"]+)"[^>]*class="cinemaplayer-item-select"/g;
     while ((match = regex2.exec(html)) !== null) {
-      players.push({ url: match[1], title: '' });
+      players.push({ url: fixUrl(match[1]), title: '' });
     }
   }
 
   if (!players.length) {
     const regex3 = /data-value="(https?:\/\/[^"]+)"/g;
     while ((match = regex3.exec(html)) !== null) {
-      players.push({ url: match[1], title: '' });
+      players.push({ url: fixUrl(match[1]), title: '' });
     }
   }
 
