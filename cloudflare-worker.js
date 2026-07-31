@@ -14,20 +14,20 @@ export default {
     const url = new URL(request.url);
     const tmdbId = url.searchParams.get('id');
     const proxyUrl = url.searchParams.get('proxy');
-    const debugId = url.searchParams.get('debug');
+    const debugMode = url.searchParams.get('debug') === '1';
 
     if (proxyUrl) {
       return await handleProxy(proxyUrl, corsHeaders);
     }
 
-    if (debugId) {
-      return await handleDebug(debugId, corsHeaders);
-    }
-
     if (!tmdbId) {
-      return new Response(JSON.stringify({ error: 'Missing id parameter' }), {
+      return new Response(JSON.stringify({ error: 'Missing id parameter. Usage: ?id=TMDB_ID' }), {
         status: 400, headers: corsHeaders
       });
+    }
+
+    if (debugMode) {
+      return await handleDebug(tmdbId, corsHeaders);
     }
 
     try {
