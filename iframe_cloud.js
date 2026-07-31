@@ -1,13 +1,23 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v2.3.0');
+  console.log('[iframe-cloud] Loading v2.4.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
 
+  function playNative(url, title) {
+    console.log('[iframe-cloud] Native play:', url);
+    Lampa.Player.play({
+      title: title || PLUGIN_NAME,
+      url: url,
+      quality: {},
+      callback: function() {}
+    });
+  }
+
   function openIframe(url, title) {
-    console.log('[iframe-cloud] Opening overlay:', url);
+    console.log('[iframe-cloud] Overlay:', url);
     $('.iframe-cloud-overlay').remove();
 
     var overlay = $('<div class="iframe-cloud-overlay"></div>');
@@ -47,10 +57,7 @@
 
     overlay.append(loading).append(iframe).append(closeBtn).append(hint);
     $('body').append(overlay);
-
-    setTimeout(function() {
-      Lampa.Controller.toggle('iframe_cloud_overlay');
-    }, 300);
+    setTimeout(function() { Lampa.Controller.toggle('iframe_cloud_overlay'); }, 300);
   }
 
   function openPlugin(movie) {
@@ -67,12 +74,33 @@
         var players = data.players || [];
         if (!players.length) { openIframe('https://iframe.cloud/iframe/' + id, title); return; }
 
-        if (players.length === 1) { openIframe(players[0].url, title); return; }
+        var withVideo = players.filter(function(p) { return p.video_url; });
+        var withoutVideo = players.filter(function(p) { return !p.video_url; });
+
+        var items = players.map(function(p) {
+          return {
+            title: p.title || 'Плеер',
+            subtitle: p.video_url ? (p.type || 'video') : 'iframe',
+            _player: p
+          };
+        });
+
+        if (withVideo.length === 1 && !withoutVideo.length) {
+          playNative(withVideo[0].video_url, title);
+          return;
+        }
 
         Lampa.Select.show({
           title: PLUGIN_NAME + ' — ' + title,
-          items: players.map(function(p) { return { title: p.title || 'Плеер', subtitle: title, url: p.url }; }),
-          onSelect: function(item) { openIframe(item.url, item.title || title); }
+          items: items,
+          onSelect: function(item) {
+            var p = item._player;
+            if (p.video_url) {
+              playNative(p.video_url, title);
+            } else {
+              openIframe(p.url, title);
+            }
+          }
         });
       })
       .catch(function(e) {
@@ -85,7 +113,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.3.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.4.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -114,7 +142,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '2.3.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '2.4.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
