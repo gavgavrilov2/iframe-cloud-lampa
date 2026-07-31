@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.1.0');
+  console.log('[iframe-cloud] Loading v5.2.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -13,10 +13,12 @@
     return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
   }
 
-  function fetchJson(url, headers) {
-    var opts = {};
-    if (headers) opts.headers = headers;
-    return window.fetch(url, opts)
+  function proxyApi(url) {
+    return WORKER_URL + '/?api=' + encodeURIComponent(url) + '&apikey=' + encodeURIComponent(KP_API_TOKEN);
+  }
+
+  function fetchJsonViaWorker(url) {
+    return window.fetch(proxyApi(url))
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -53,9 +55,9 @@
     }
 
     var apiUrl = KP_API_BASE + '?' + query + '&selectFields=id';
-    console.log('[iframe-cloud] Querying kinopoisk.dev:', query);
+    console.log('[iframe-cloud] Querying kinopoisk.dev via Worker:', query);
 
-    return fetchJson(apiUrl, { 'X-API-KEY': KP_API_TOKEN })
+    return fetchJsonViaWorker(apiUrl)
       .then(function(data) {
         if (data.docs && data.docs.length > 0 && data.docs[0].id) {
           var kpId = data.docs[0].id;
@@ -146,7 +148,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.1.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.2.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -175,7 +177,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.1.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.2.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

@@ -3,7 +3,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-API-KEY',
       'Content-Type': 'application/json'
     };
 
@@ -13,16 +13,46 @@ export default {
 
     const url = new URL(request.url);
     const proxyUrl = url.searchParams.get('proxy');
+    const apiKey = url.searchParams.get('apikey');
+    const apiUrl = url.searchParams.get('api');
+
+    if (apiUrl) {
+      return await handleApiProxy(apiUrl, apiKey, corsHeaders);
+    }
 
     if (proxyUrl) {
       return await handleProxy(proxyUrl, corsHeaders);
     }
 
-    return new Response(JSON.stringify({ error: 'Usage: ?proxy=URL' }), {
+    return new Response(JSON.stringify({ error: 'Usage: ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
       status: 400, headers: corsHeaders
     });
   }
 };
+
+async function handleApiProxy(targetUrl, apiKey, corsHeaders) {
+  try {
+    var headers = {
+      'Accept': 'application/json'
+    };
+    if (apiKey) {
+      headers['X-API-KEY'] = apiKey;
+    }
+
+    var resp = await fetch(targetUrl, { headers: headers, redirect: 'follow' });
+    var data = await resp.text();
+
+    return new Response(data, {
+      status: resp.status,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
 
 async function handleProxy(targetUrl, corsHeaders) {
   try {
