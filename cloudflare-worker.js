@@ -14,9 +14,14 @@ export default {
     const url = new URL(request.url);
     const tmdbId = url.searchParams.get('id');
     const proxyUrl = url.searchParams.get('proxy');
+    const debugId = url.searchParams.get('debug');
 
     if (proxyUrl) {
       return await handleProxy(proxyUrl, corsHeaders);
+    }
+
+    if (debugId) {
+      return await handleDebug(debugId, corsHeaders);
     }
 
     if (!tmdbId) {
@@ -39,28 +44,34 @@ export default {
   }
 };
 
-async function getPlayers(tmdbId) {
-  const iframeUrl = 'https://iframe.cloud/iframe/' + tmdbId;
-  const resp = await fetch(iframeUrl, {
+async function getIframePage(tmdbId) {
+  const resp = await fetch('https://iframe.cloud/iframe/' + tmdbId, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': 'https://iframe.cloud/',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8'
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
+      'Referer': 'https://iframe.cloud/'
     }
   });
+  return resp;
+}
 
-  if (!resp.ok) throw new Error('iframe.cloud returned ' + resp.status);
+async function getPlayers(tmdbId) {
+  const iframeResp = await getIframePage(tmdbId);
 
-  const html = await resp.text();
+  if (!iframeResp.ok) throw new Error('iframe.cloud returned ' + iframeResp.status);
+
+  const html = await iframeResp.text();
   let players = extractPlayers(html);
 
-  players = players.filter(p => !isVeoveo(p));
+  players = players.filter(function(p) { return !isVeoveo(p); });
+
+  const cookies = getSetCookies(iframeResp);
 
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
     try {
-      const result = await findVideoUrl(p.url);
+      const result = await findVideoUrl(p.url, cookies);
       if (result) {
         p.video_url = result.url;
         p.type = result.type;
@@ -69,6 +80,16 @@ async function getPlayers(tmdbId) {
   }
 
   return players;
+}
+
+function getSetCookies(resp) {
+  const raw = resp.headers.getSetCookie ? resp.headers.getSetCookie() : [];
+  if (raw && raw.length) {
+    return raw.map(function(c) { return c.split(';')[0]; }).join('; ');
+  }
+  const one = resp.headers.get('Set-Cookie');
+  if (one) return one.split(';')[0];
+  return '';
 }
 
 function isVeoveo(p) {
@@ -85,20 +106,65 @@ async function handleProxy(targetUrl, corsHeaders) {
         'Accept': '*/*'
       }
     });
-
     var headers = { 'Access-Control-Allow-Origin': '*' };
     var ct = resp.headers.get('Content-Type');
     if (ct) headers['Content-Type'] = ct;
-
     return new Response(resp.body, { status: resp.status, headers: headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: corsHeaders
-    });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
 }
 
-async function findVideoUrl(embedUrl) {
+async function handleDebug(tmdbId, corsHeaders) {
+  try {
+    const iframeResp = await getIframePage(tmdbId);
+    const html = await iframeResp.text();
+    const players = extractPlayers(html);
+    const filtered = players.filter(function(p) { return !isVeoveo(p); });
+
+    const results = [];
+    const cookies = getSetCookies(iframeResp);
+
+    for (let i = 0; i < filtered.length; i++) {
+      const p = filtered[i];
+      const debug = { title: p.title, url: p.url, status: null, html_snippet: null, video_url: null };
+
+      try {
+        if (p.url.startsWith('//')) p.url = 'https:' + p.url;
+        const resp = await fetch(p.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
+            'Referer': 'https://iframe.cloud/',
+            'Cookie': cookies
+          },
+          redirect: 'follow'
+        });
+        debug.status = resp.status;
+        const embedHtml = await resp.text();
+        debug.html_snippet = embedHtml.substring(0, 3000);
+
+        const result = extractVideoFromHtml(embedHtml);
+        if (result) {
+          debug.video_url = result.url;
+        }
+      } catch (e) {
+        debug.error = e.message;
+      }
+
+      results.push(debug);
+    }
+
+    return new Response(JSON.stringify(results, null, 2), {
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+async function findVideoUrl(embedUrl, cookies) {
   if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
   var attempts = [
@@ -107,21 +173,14 @@ async function findVideoUrl(embedUrl) {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
       'Referer': 'https://iframe.cloud/',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'cross-site'
+      'Cookie': cookies || ''
     },
     {
       'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'ru-RU,ru;q=0.9',
-      'Referer': 'https://iframe.cloud/'
-    },
-    {
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'ru-RU,ru;q=0.9',
-      'Referer': 'https://iframe.cloud/'
+      'Referer': 'https://iframe.cloud/',
+      'Cookie': cookies || ''
     }
   ];
 
@@ -139,9 +198,7 @@ async function tryExtract(embedUrl, headers) {
       headers: headers,
       redirect: 'follow'
     });
-
     if (!resp.ok) return null;
-
     var html = await resp.text();
     return extractVideoFromHtml(html);
   } catch (e) {
@@ -151,14 +208,15 @@ async function tryExtract(embedUrl, headers) {
 
 function extractVideoFromHtml(html) {
   var patterns = [
-    /["'](https?:\/\/[^"'\s]*superdupercdn\.com[^"'\s]*\.m3u8[^"'\s]*)/gi,
-    /["'](https?:\/\/[^"'\s]*superdupercdn\.com[^"'\s]*\.mp4[^"'\s]*)/gi,
-    /["'](https?:\/\/[^"'\s]*cdn[^"'\s]*\.com[^"'\s]*\.m3u8[^"'\s]*)/gi,
-    /["'](https?:\/\/[^"'\s]*cdn[^"'\s]*\.com[^"'\s]*\.mp4[^"'\s]*)/gi,
+    /["'](https?:\/\/[^"'\s]*superdupercdn[^"'\s]*\.m3u8[^"'\s]*)/gi,
+    /["'](https?:\/\/[^"'\s]*superdupercdn[^"'\s]*\.mp4[^"'\s]*)/gi,
+    /["'](https?:\/\/[^"'\s]*cdn[^"'\s]*\.m3u8[^"'\s]*)/gi,
+    /["'](https?:\/\/[^"'\s]*cdn[^"'\s]*\.mp4[^"'\s]*)/gi,
     /(?:file|src|video|url|source|playbackUrl|videoUrl|streamUrl)\s*[:=]\s*["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
     /(?:file|src|video|url|source|playbackUrl|videoUrl|streamUrl)\s*[:=]\s*["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi,
     /["'](?:file|src|video|url|source)["']\s*:\s*["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
     /["'](?:file|src|video|url|source)["']\s*:\s*["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi,
+    /data-(?:src|url|video|file)\s*=\s*["'](https?:\/\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)/gi,
     /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
     /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi
   ];
@@ -177,15 +235,6 @@ function extractVideoFromHtml(html) {
           type: url.indexOf('.m3u8') !== -1 ? 'hls' : 'mp4'
         };
       }
-    }
-  }
-
-  var nested = html.match(/<iframe[^>]+src=["']([^"']+)/i);
-  if (nested && nested[1]) {
-    var nestedUrl = nested[1];
-    if (nestedUrl.indexOf('.m3u8') !== -1 || nestedUrl.indexOf('.mp4') !== -1) {
-      if (nestedUrl.startsWith('//')) nestedUrl = 'https:' + nestedUrl;
-      return { url: nestedUrl, type: nestedUrl.indexOf('.m3u8') !== -1 ? 'hls' : 'mp4' };
     }
   }
 
