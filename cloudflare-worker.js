@@ -13,8 +13,8 @@ export default {
 
     const url = new URL(request.url);
     const tmdbId = url.searchParams.get('id');
-    const proxyUrl = url.searchParams.get('proxy');
     const embedUrl = url.searchParams.get('embed');
+    const proxyUrl = url.searchParams.get('proxy');
 
     if (proxyUrl) {
       return await handleProxy(proxyUrl, corsHeaders);
@@ -50,16 +50,13 @@ async function getPlayers(tmdbId) {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
       'Sec-Ch-Ua-Mobile': '?0',
       'Sec-Ch-Ua-Platform': '"Windows"',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-      'Cache-Control': 'max-age=0'
+      'Upgrade-Insecure-Requests': '1'
     }
   });
 
@@ -67,19 +64,7 @@ async function getPlayers(tmdbId) {
 
   var html = await resp.text();
   var players = extractPlayers(html);
-
   players = players.filter(function(p) { return !isVeoveo(p); });
-
-  for (var i = 0; i < players.length; i++) {
-    var p = players[i];
-    try {
-      var result = await tryGetVideoUrl(p.url);
-      if (result) {
-        p.video_url = result.url;
-        p.type = result.type;
-      }
-    } catch (e) {}
-  }
 
   return players;
 }
@@ -115,44 +100,29 @@ async function handleEmbedFetch(embedUrl, corsHeaders) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
-        'Referer': 'https://iframe.cloud/'
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Upgrade-Insecure-Requests': '1'
       },
       redirect: 'follow'
     });
-    if (!resp.ok) {
-      return new Response(JSON.stringify({ error: 'Embed returned ' + resp.status, status: resp.status }), {
-        status: resp.status, headers: corsHeaders
-      });
-    }
+
     var html = await resp.text();
     var result = extractVideoFromHtml(html);
+
     return new Response(JSON.stringify({
       status: resp.status,
-      html_length: html.length,
-      html_snippet: html.substring(0, 5000),
-      video: result
+      url: resp.url,
+      video: result,
+      snippet: html.substring(0, 2000)
     }), { headers: corsHeaders });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
-}
-
-async function tryGetVideoUrl(embedUrl) {
-  if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
-
-  var resp = await fetch(embedUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
-      'Referer': 'https://iframe.cloud/'
-    },
-    redirect: 'follow'
-  });
-
-  if (!resp.ok) return null;
-  var html = await resp.text();
-  return extractVideoFromHtml(html);
 }
 
 function extractVideoFromHtml(html) {
@@ -209,9 +179,9 @@ function fixUrl(url) {
 function extractPlayers(html) {
   var players = [];
   var seen = {};
+  var match;
 
   var regex = /data-value="(https?:\/\/[^"]+)"[^>]*>([^<]*)/g;
-  var match;
 
   while ((match = regex.exec(html)) !== null) {
     var url = fixUrl(match[1]);
