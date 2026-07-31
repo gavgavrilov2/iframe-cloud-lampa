@@ -1,0 +1,7 @@
+@charset 'UTF-8';
+.iframe-cloud-loading {
+  padding: 2em;
+  text-align: center;
+  color: rgba(255,255,255,0.5);
+  font-size: 1.2em;
+}

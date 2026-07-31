@@ -1,0 +1,7 @@
+{
+  "type": "video",
+  "version": "1.0.0",
+  "name": "Iframe Cloud",
+  "description": "Плагин для просмотра фильмов через iframe.cloud",
+  "component": "iframe_cloud"
+}
