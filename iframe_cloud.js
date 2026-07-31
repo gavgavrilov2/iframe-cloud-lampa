@@ -371,10 +371,39 @@
 
   /* ---- Process ortified embed ---- */
 
+  function showIframePlayer(url, label) {
+    var overlay = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
+    var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">✕ Закрыть</div>');
+    var iframe = $('<iframe src="' + url + '" style="width:100%;height:100%;border:none;" allowfullscreen="true" allow="autoplay; fullscreen"></iframe>');
+
+    var removed = false;
+    function close() {
+      if (removed) return;
+      removed = true;
+      overlay.remove();
+      document.removeEventListener('keydown', keyHandler);
+      console.log('[iframe-cloud] iframe player closed');
+    }
+
+    closeBtn.on('hover:enter click', close);
+
+    var keyHandler = function(e) {
+      if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
+        close();
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    overlay.append(iframe).append(closeBtn);
+    $('body').append(overlay);
+
+    console.log('[iframe-cloud] iframe player opened:', label);
+  }
+
   function playOrtified(url, playerLabel, movieTitle) {
-    console.log('[iframe-cloud] Opening ortified in browser:', url);
-    window.open(url, '_blank');
-    Lampa.Noty.show(PLUGIN_NAME + ': откройте в браузере');
+    console.log('[iframe-cloud] ortified:', url);
+    showIframePlayer(url, playerLabel);
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + playerLabel);
   }
 
   /* ---- Auto-try next player ---- */
@@ -387,8 +416,7 @@
         playOrtified(np.url, np.source + ' (' + (np.translate || '') + ')', movieTitle);
         return true;
       } else {
-        Lampa.Noty.show(PLUGIN_NAME + ': откройте ' + np.source + ' в браузере');
-        window.open(np.url, '_blank');
+        showIframePlayer(np.url, np.source + ' (' + (np.translate || '') + ')');
         return true;
       }
     }
@@ -452,8 +480,7 @@
               if (isOrtified(p)) {
                 playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title);
               } else {
-                window.open(p.url, '_blank');
-                Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
+                showIframePlayer(p.url, p.source + ' (' + (p.translate || '') + ')');
               }
             }
           });
