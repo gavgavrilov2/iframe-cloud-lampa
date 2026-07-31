@@ -5,7 +5,7 @@
 
   var PLUGIN_NAME = 'Iframe Cloud';
 
-  var WORKER_URL = Lampa.Storage.get('iframe_cloud_worker', '');
+  var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
 
   function openIframe(url, title) {
     console.log('[iframe-cloud] Opening overlay:', url);
