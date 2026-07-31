@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.4.0');
+  console.log('[iframe-cloud] Loading v5.4.1');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -333,29 +333,30 @@
             return { title: p.title, subtitle: p.url.substring(0, 50), _url: p.url };
           });
 
+          items.push({ title: '🌐 Открыть в браузере', subtitle: 'iframe.cloud', _browser: true, _cloudUrl: IFRAME_CLOUD_BASE + targetId });
+
           Lampa.Select.show({
             title: PLUGIN_NAME + ' — ' + title,
             items: items,
             onSelect: function(item) {
+              if (item._browser) {
+                window.open(item._cloudUrl || item._url, '_blank');
+                Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
+                return;
+              }
+
               Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + item.title + '...');
 
-              if (isOrtified(item._url)) {
-                fetchHtml(item._url).then(function(embedHtml) {
+              fetchHtml(item._url).then(function(embedHtml) {
+                if (isOrtified(item._url)) {
                   processOrtifiedEmbed(embedHtml, title);
-                }).catch(function(e) {
-                  console.log('[iframe-cloud] ortified error:', e.message);
-                  Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки');
-                });
-              } else {
-                // For other players: try to find m3u8 URLs, fallback to browser
-                fetchHtml(item._url).then(function(embedHtml) {
+                } else {
                   processGenericEmbed(embedHtml, title);
-                }).catch(function(e) {
-                  console.log('[iframe-cloud] embed error:', e.message, '- opening in browser');
-                  window.open(item._url, '_blank');
-                  Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
-                });
-              }
+                }
+              }).catch(function(e) {
+                console.log('[iframe-cloud] embed error:', e.message);
+                Lampa.Noty.show(PLUGIN_NAME + ': ' + item.title + ' недоступен');
+              });
             }
           });
         });
@@ -372,7 +373,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.4.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.4.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
