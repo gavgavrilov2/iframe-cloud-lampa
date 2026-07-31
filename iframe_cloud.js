@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.17.0');
+  console.log('[iframe-cloud] Loading v5.18.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -401,6 +401,217 @@
     });
   }
 
+  /* ---- playIframeCloud: try to play all sources natively ---- */
+
+  function tryFindM3u8InHtml(html) {
+    if (!html) return null;
+
+    var patterns = [
+      /(?:https?:\/\/)[^\s"'<>]+\.m3u8[^\s"'<>]*/gi,
+      /["']((?:https?:\/\/)[^\s"'<>]+\.m3u8[^\s"'<>]*)/gi,
+      /file\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/gi,
+      /src\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/gi
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = html.match(patterns[i]);
+      if (match) {
+        var url = typeof match[1] === 'string' ? match[1] : match[0];
+        url = url.replace(/['"]/g, '').trim();
+        if (url.indexOf('.m3u8') !== -1) return url;
+      }
+    }
+
+    return null;
+  }
+
+  function tryFindAllohaUrl(html, pUrl) {
+    if (!html) return null;
+
+    var fileListMatch = html.match(/(?:const|var|let)\s+fileList\s*=\s*JSON\.parse\(['"](.+?)['"]\)/);
+    if (!fileListMatch) return null;
+
+    try {
+      var fileList = JSON.parse(fileListMatch[1]);
+      var active = fileList.active;
+      if (!active || !active.id) return null;
+
+      var userParamMatch = html.match(/(?:const|var|let)\s+userParam\s*=\s*(\{[\s\S]*?\})\s*;/);
+      var domain = 'https://api.ortified.ws/';
+      var token = '';
+
+      if (userParamMatch) {
+        var domainMatch = userParamMatch[1].match(/domain\s*:\s*['"]([^'"]+)['"]/);
+        var tokenMatch = userParamMatch[1].match(/token\s*:\s*['"]([^'"]+)['"]/);
+        if (domainMatch) domain = decodeURIComponent(domainMatch[1]);
+        if (tokenMatch) token = tokenMatch[1];
+      }
+
+      var fileId = active.id;
+      var tryUrls = [
+        domain + 'api/file/' + fileId + '/hls?token=' + token,
+        domain + 'api/video/' + fileId + '/hls?token=' + token,
+        domain + 'hls/' + fileId + '.m3u8?token=' + token,
+        domain + 'api/file/' + fileId + '/playlist.m3u8?token=' + token
+      ];
+
+      return { tryUrls: tryUrls, fileList: fileList };
+    } catch (e) {
+      console.log('[iframe-cloud] Alloha fileList parse error:', e.message);
+      return null;
+    }
+  }
+
+  function playIframeCloud(cloudUrl, movieTitle) {
+    Lampa.Loading.start('Iframe Cloud');
+
+    var kpMatch = cloudUrl.match(/\/iframe\/(\d+)/);
+    if (!kpMatch) {
+      Lampa.Loading.stop();
+      showIframePlayer(cloudUrl, movieTitle);
+      return;
+    }
+
+    var kpId = kpMatch[1];
+
+    fetchJsonViaProxy(IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId).then(function(data) {
+      var players = (data.players || []).filter(function(p) { return !isVeoveo(p); });
+
+      if (!players.length) {
+        Lampa.Loading.stop();
+        Lampa.Noty.show(PLUGIN_NAME + ': источники не найдены');
+        showIframePlayer(cloudUrl, movieTitle);
+        return;
+      }
+
+      tryExtractCloudPlayers(players, 0, movieTitle, function(results) {
+        Lampa.Loading.stop();
+
+        if (results.length === 0) {
+          Lampa.Noty.show(PLUGIN_NAME + ': не удалось извлечь видео, открываем в браузере...');
+          showIframePlayer(cloudUrl, movieTitle);
+          return;
+        }
+
+        if (results.length === 1) {
+          var r = results[0];
+          if (r.hls) {
+            playHlsProxied(r.hls, movieTitle);
+          } else if (r.seasons && r.seasons.length) {
+            showSeasonSelector(r.seasons, movieTitle, r.current);
+          } else {
+            showIframePlayer(players[0].url, movieTitle);
+          }
+          return;
+        }
+
+        var items = results.map(function(r) {
+          return {
+            title: r.label,
+            subtitle: r.quality || '',
+            _result: r
+          };
+        });
+
+        Lampa.Select.show({
+          title: PLUGIN_NAME + ' \u2014 ' + movieTitle,
+          items: items,
+          onSelect: function(item) {
+            var r = item._result;
+            if (r.hls) {
+              playHlsProxied(r.hls, movieTitle);
+            } else if (r.seasons && r.seasons.length) {
+              showSeasonSelector(r.seasons, movieTitle, r.current);
+            } else {
+              showIframePlayer(r.url, movieTitle);
+            }
+          }
+        });
+      });
+    }).catch(function(e) {
+      Lampa.Loading.stop();
+      console.log('[iframe-cloud] playIframeCloud error:', e.message);
+      showIframePlayer(cloudUrl, movieTitle);
+    });
+  }
+
+  function tryExtractCloudPlayers(players, index, movieTitle, done) {
+    if (index >= players.length) {
+      done([]);
+      return;
+    }
+
+    var p = players[index];
+    var label = p.source + ' \u2014 ' + (p.translate || '') + ' (' + (p.quality || '') + ')';
+    var url = p.url || '';
+
+    if (!url) {
+      tryExtractCloudPlayers(players, index + 1, movieTitle, done);
+      return;
+    }
+
+    var isOrt = url.indexOf('ortified.ws') !== -1 || url.indexOf('stravers.live') !== -1;
+
+    function handleNext(currentResult) {
+      tryExtractCloudPlayers(players, index + 1, movieTitle, function(rest) {
+        if (currentResult) rest.unshift(currentResult);
+        done(rest);
+      });
+    }
+
+    function processHtml(html) {
+      var data = parseOrtifiedEmbed(html);
+
+      if (data.hlsUrl) {
+        console.log('[iframe-cloud] Found HLS in', p.source, ':', data.hlsUrl.substring(0, 80));
+        handleNext({ label: label, hls: data.hlsUrl, quality: p.quality, url: url });
+      } else if (data.seasons.length) {
+        handleNext({ label: label, seasons: data.seasons, current: data.current, quality: p.quality, url: url });
+      } else {
+        var alloha = tryFindAllohaUrl(html, url);
+        if (alloha && alloha.tryUrls.length) {
+          tryAllohaUrls(alloha.tryUrls, 0, function(found) {
+            if (found) {
+              handleNext({ label: label, hls: found, quality: p.quality, url: url });
+            } else {
+              handleNext(null);
+            }
+          });
+        } else {
+          var hls = tryFindM3u8InHtml(html);
+          if (hls) {
+            handleNext({ label: label, hls: hls, quality: p.quality, url: url });
+          } else {
+            handleNext(null);
+          }
+        }
+      }
+    }
+
+    fetchOrtifiedViaProxies(url).then(processHtml).catch(function() {
+      handleNext(null);
+    });
+  }
+
+  function tryAllohaUrls(urls, index, done) {
+    if (index >= urls.length) {
+      done(null);
+      return;
+    }
+
+    var testUrl = urls[index];
+    fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(testUrl)).then(function(text) {
+      if (text && text.indexOf('.m3u8') !== -1 && text.indexOf('#EXTM3U') !== -1) {
+        console.log('[iframe-cloud] Alloha HLS found at url index', index);
+        done(testUrl);
+      } else {
+        tryAllohaUrls(urls, index + 1, done);
+      }
+    }).catch(function() {
+      tryAllohaUrls(urls, index + 1, done);
+    });
+  }
+
   /* ---- Auto-try next player ---- */
 
   function tryNextPlayer(players, currentIndex, movieTitle) {
@@ -462,7 +673,7 @@
             items: items,
             onSelect: function(item) {
               if (item._browser) {
-                window.open(item._cloudUrl, '_blank');
+                playIframeCloud(item._cloudUrl, title);
                 return;
               }
 
@@ -494,7 +705,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.17.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.18.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
