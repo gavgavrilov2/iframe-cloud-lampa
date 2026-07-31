@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v4.3.0');
+  console.log('[iframe-cloud] Loading v5.0.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -11,12 +11,61 @@
     return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
   }
 
+  function fetchJson(url) {
+    return window.fetch(url)
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+  }
+
   function fetchHtml(url) {
     return window.fetch(proxy(url))
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.text();
       });
+  }
+
+  function getKinopoiskId(movie) {
+    if (movie.kinopoisk_id) {
+      console.log('[iframe-cloud] Found kinopoisk_id:', movie.kinopoisk_id);
+      return Promise.resolve(movie.kinopoisk_id);
+    }
+
+    var wikidataId = null;
+    if (movie.external_ids && movie.external_ids.wikidata_id) {
+      wikidataId = movie.external_ids.wikidata_id;
+    }
+    if (!wikidataId && movie.wikidata_id) {
+      wikidataId = movie.wikidata_id;
+    }
+
+    if (wikidataId) {
+      console.log('[iframe-cloud] Looking up Wikidata:', wikidataId);
+      var wikiUrl = 'https://www.wikidata.org/wiki/Special:EntityData/' + wikidataId + '.json';
+      return fetchJson(wikiUrl)
+        .then(function(data) {
+          var entity = data.entities[wikidataId];
+          if (!entity || !entity.claims) return null;
+
+          var p12196 = entity.claims['P12196'];
+          if (p12196 && p12196.length > 0) {
+            var val = p12196[0].mainsnak && p12196[0].mainsnak.datavalue && p12196[0].mainsnak.datavalue.value;
+            if (val) {
+              console.log('[iframe-cloud] Got Kinopoisk ID from Wikidata:', val);
+              return val;
+            }
+          }
+          return null;
+        })
+        .catch(function(e) {
+          console.log('[iframe-cloud] Wikidata lookup failed:', e.message);
+          return null;
+        });
+    }
+
+    return Promise.resolve(null);
   }
 
   function extractPlayersFromHtml(html) {
@@ -35,133 +84,67 @@
     return players;
   }
 
-  function extractVideoFromHtml(html) {
-    var patterns = [
-      /["'](https?:\/\/[^"'\s]*superdupercdn[^"'\s]*\.m3u8[^"'\s]*)/gi,
-      /["'](https?:\/\/[^"'\s]*superdupercdn[^"'\s]*\.mp4[^"'\s]*)/gi,
-      /(?:file|src|video|url|source|playbackUrl|videoUrl|streamUrl|hls|dash|manifest)\s*[:=]\s*["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
-      /(?:file|src|video|url|source|playbackUrl|videoUrl|streamUrl|hls|dash)\s*[:=]\s*["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi,
-      /["'](?:file|src|video|url|source|hls|dash)["']\s*:\s*["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
-      /["'](?:file|src|video|url|source|hls|dash)["']\s*:\s*["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi,
-      /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/gi,
-      /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/gi
-    ];
-    for (var i = 0; i < patterns.length; i++) {
-      var match;
-      var regex = new RegExp(patterns[i].source, patterns[i].flags);
-      while ((match = regex.exec(html)) !== null) {
-        var url = match[1];
-        if (url && (url.indexOf('.m3u8') !== -1 || url.indexOf('.mp4') !== -1)) {
-          if (url.indexOf('example.com') !== -1) continue;
-          if (url.indexOf('iframe.cloud') !== -1) continue;
-          if (url.startsWith('//')) url = 'https:' + url;
-          return { url: url, type: url.indexOf('.m3u8') !== -1 ? 'hls' : 'mp4' };
-        }
-      }
-    }
-    return null;
-  }
-
   function isVeoveo(p) {
     var t = (p.title || '').toLowerCase();
     var u = (p.url || '').toLowerCase();
     return t.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
   }
 
-  function playNative(url, title) {
-    Lampa.Player.play({
-      title: title || PLUGIN_NAME,
-      url: url,
-      quality: {},
-      callback: function() {}
-    });
-  }
-
-  function openExternal(url, title) {
-    console.log('[iframe-cloud] Opening external:', url);
+  function openInBrowser(url, title) {
+    console.log('[iframe-cloud] Opening in browser:', url);
     window.open(url, '_blank');
-    Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере — ' + title);
+    Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
   }
 
   function openPlugin(movie) {
     var id = movie.id;
     if (!id) { Lampa.Noty.show('Нет ID фильма'); return; }
     var title = movie.title || movie.name || '';
-    var url = IFRAME_CLOUD_BASE + id;
 
-    console.log('[iframe-cloud] Fetching iframe.cloud for:', id);
+    Lampa.Noty.show(PLUGIN_NAME + ': поиск Kinopoisk ID...');
 
-    fetchHtml(url)
-      .then(function(html) {
-        var players = extractPlayersFromHtml(html);
-        console.log('[iframe-cloud] Players found:', players.length);
-        players = players.filter(function(p) { return !isVeoveo(p); });
+    getKinopoiskId(movie)
+      .then(function(kpId) {
+        var targetId = kpId || id;
+        var idType = kpId ? 'KP:' + kpId : 'TMDB:' + id;
+        console.log('[iframe-cloud] Using ID:', idType);
 
-        if (!players.length) {
-          console.log('[iframe-cloud] No players in HTML, opening in browser');
-          openExternal(url, title);
-          return;
-        }
+        var url = IFRAME_CLOUD_BASE + targetId;
 
-        var embedPromises = players.map(function(p) {
-          return fetchHtml(p.url)
-            .then(function(embedHtml) {
-              var video = extractVideoFromHtml(embedHtml);
-              if (video) {
-                p.video_url = video.url;
-                p.type = video.type;
+        return fetchHtml(url).then(function(html) {
+          var players = extractPlayersFromHtml(html);
+          console.log('[iframe-cloud] Players found:', players.length);
+          players = players.filter(function(p) { return !isVeoveo(p); });
+
+          if (players.length > 0) {
+            Lampa.Noty.show(PLUGIN_NAME + ': найдено ' + players.length + ' плееров (' + idType + ')');
+
+            var items = players.map(function(p) {
+              return {
+                title: p.title,
+                subtitle: 'iframe.cloud',
+                _url: p.url
+              };
+            });
+
+            Lampa.Select.show({
+              title: PLUGIN_NAME + ' — ' + title,
+              items: items,
+              onSelect: function(item) {
+                openInBrowser(item._url, title);
               }
-              return p;
-            })
-            .catch(function() { return p; });
-        });
-
-        Promise.all(embedPromises).then(function(results) {
-          var withVideo = results.filter(function(p) { return !!p.video_url; });
-          var withoutVideo = results.filter(function(p) { return !p.video_url; });
-
-          if (withVideo.length === 1 && !withoutVideo.length) {
-            playNative(withVideo[0].video_url, title);
-            return;
-          }
-
-          if (withVideo.length === 0 && withoutVideo.length === 1) {
-            openExternal(withoutVideo[0].url, title);
-            return;
-          }
-
-          var items = [];
-
-          withVideo.forEach(function(p) {
-            items.push({
-              title: (p.title || 'Плеер') + ' [' + (p.type || 'video').toUpperCase() + ']',
-              subtitle: 'Нативный плеер',
-              _player: p
             });
-          });
-
-          withoutVideo.forEach(function(p) {
-            items.push({
-              title: p.title || 'Плеер',
-              subtitle: 'iframe',
-              _player: p
-            });
-          });
-
-          Lampa.Select.show({
-            title: PLUGIN_NAME + ' — ' + title,
-            items: items,
-            onSelect: function(item) {
-              var p = item._player;
-              if (p.video_url) playNative(p.video_url, title);
-              else openExternal(p.url, title);
-            }
-          });
+          } else {
+            console.log('[iframe-cloud] No players in HTML, opening in browser');
+            Lampa.Noty.show(PLUGIN_NAME + ': плееры загружаются в браузере (' + idType + ')');
+            openInBrowser(url, title);
+          }
         });
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
-        openExternal(url, title);
+        var url = IFRAME_CLOUD_BASE + id;
+        openInBrowser(url, title);
       });
   }
 
@@ -169,7 +152,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v4.3.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.0.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -198,7 +181,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '4.3.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.0.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
