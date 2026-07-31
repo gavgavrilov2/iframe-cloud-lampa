@@ -1,10 +1,11 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.6.0');
+  console.log('[iframe-cloud] Loading v5.9.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
+  var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
@@ -36,6 +37,38 @@
 
   function fetchJsonViaProxy(url) {
     return fetchJson(proxy(url));
+  }
+
+  /* ---- ortified multi-proxy fetch ---- */
+
+  function fetchOrtifiedHtml(url) {
+    console.log('[iframe-cloud] fetchOrtifiedHtml:', url.substring(0, 80));
+
+    return fetchText(proxy(url)).then(function(html) {
+      if (html && html.indexOf('makePlayer') !== -1) {
+        console.log('[iframe-cloud] ortified via Worker OK');
+        return html;
+      }
+      throw new Error('No makePlayer in Worker response');
+    }).catch(function(e) {
+      console.log('[iframe-cloud] Worker failed for ortified:', e.message, '- trying Vercel');
+      return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url)).then(function(html) {
+        if (html && html.indexOf('makePlayer') !== -1) {
+          console.log('[iframe-cloud] ortified via Vercel OK');
+          return html;
+        }
+        throw new Error('No makePlayer in Vercel response');
+      });
+    }).catch(function(e) {
+      console.log('[iframe-cloud] Vercel failed for ortified:', e.message, '- trying direct');
+      return fetchText(url).then(function(html) {
+        if (html && html.indexOf('makePlayer') !== -1) {
+          console.log('[iframe-cloud] ortified via direct OK');
+          return html;
+        }
+        throw new Error('No makePlayer in direct response');
+      });
+    });
   }
 
   /* ---- Kinopoisk ID ---- */
@@ -374,7 +407,7 @@
   function playOrtified(url, playerLabel, movieTitle, onFailure) {
     Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
 
-    fetchText(proxy(url)).then(function(html) {
+    fetchOrtifiedHtml(url).then(function(html) {
       var data = parseOrtifiedEmbed(html);
 
       if (data.seasons.length > 0) {
@@ -498,7 +531,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.6.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.9.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -527,7 +560,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.6.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.9.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
