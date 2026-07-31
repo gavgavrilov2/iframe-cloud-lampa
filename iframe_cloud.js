@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.14.0');
+  console.log('[iframe-cloud] Loading v5.15.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -217,12 +217,15 @@
   }
 
   function parseOrtifiedEmbed(html) {
-    var result = { seasons: [], hlsUrl: null, current: null };
+    var result = { seasons: [], hlsUrl: null, current: null, authKey: null };
 
     var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
     if (!mkMatch) return result;
 
     var mkScript = mkMatch[1];
+
+    var authMatch = mkScript.match(/var\s+\w+\s*=\s*"([a-f0-9]{8,})"/);
+    if (authMatch) { result.authKey = authMatch[1]; }
 
     var seasonsIdx = mkScript.indexOf('"seasons":[');
     if (seasonsIdx === -1) seasonsIdx = mkScript.indexOf('seasons:[');
@@ -267,15 +270,27 @@
 
   /* ---- Lampa Player ---- */
 
-  function playHls(url, title) {
+  function addAuthKey(url, key) {
+    if (!url || !key) return url;
+    if (url.indexOf(key) !== -1) return url;
+    return url + (url.indexOf('?') !== -1 ? '&' : '?') + key;
+  }
+
+  function playHls(url, title, embedUrl, onFailure) {
     console.log('[iframe-cloud] Playing HLS:', url.substring(0, 80));
-    Lampa.Player.play({ url: url, title: title || PLUGIN_NAME, quality: true, subtitles: [] });
-    Lampa.Player.run();
+    var video = {
+      url: url,
+      title: title || PLUGIN_NAME,
+      quality: true,
+      subtitles: []
+    };
+    Lampa.Player.play(video);
+    Lampa.Player.playlist([video]);
   }
 
   /* ---- Episode/Season UI ---- */
 
-  function showEpisodeSelector(seasons, title, current) {
+  function showEpisodeSelector(seasons, title, current, authKey, embedUrl) {
     var items = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
@@ -287,7 +302,7 @@
       for (var e = 0; e < eps.length; e++) {
         var ep = eps[e];
         var eNum = ep.episode || (e + 1);
-        var hls = ep.hls || '';
+        var hls = ep.hls ? addAuthKey(ep.hls, authKey) : '';
         var dur = ep.duration ? Math.round(ep.duration / 60) + ' мин' : '';
         var isCur = current && current.season == sNum && current.episode == eNum;
 
@@ -307,11 +322,11 @@
     Lampa.Select.show({
       title: PLUGIN_NAME + ' — ' + title,
       items: items,
-      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title); }
+      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title, embedUrl); }
     });
   }
 
-  function showSeasonSelector(seasons, title, current) {
+  function showSeasonSelector(seasons, title, current, authKey, embedUrl) {
     var items = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
@@ -330,8 +345,12 @@
       items: items,
       onSelect: function(item) {
         var eps = item._season.episodes || [];
-        if (eps.length === 1) { playHls(eps[0].hls, 'S' + item._sNum + 'E1 ' + title); }
-        else { showEpisodeSelector([item._season], title, current); }
+        if (eps.length === 1) {
+          var hls = eps[0].hls ? addAuthKey(eps[0].hls, authKey) : '';
+          playHls(hls, 'S' + item._sNum + 'E1 ' + title, embedUrl);
+        } else {
+          showEpisodeSelector([item._season], title, current, authKey, embedUrl);
+        }
       }
     });
   }
@@ -391,15 +410,34 @@
 
     fetchOrtifiedViaProxies(url).then(function(html) {
       var data = parseOrtifiedEmbed(html);
+      var authKey = data.authKey || '';
 
       if (data.seasons.length > 0) {
-        Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
-        showSeasonSelector(data.seasons, movieTitle, data.current);
+        var firstHls = null;
+        for (var s = 0; s < data.seasons.length; s++) {
+          var eps = data.seasons[s].episodes || [];
+          if (eps.length && eps[0].hls) { firstHls = addAuthKey(eps[0].hls, authKey); break; }
+        }
+
+        if (firstHls) {
+          console.log('[iframe-cloud] Trying HLS first, auth key:', authKey);
+          var video = { url: firstHls, title: movieTitle, quality: true, subtitles: [] };
+          Lampa.Player.play(video);
+          Lampa.Player.playlist([video]);
+
+          setTimeout(function() {
+            showSeasonSelector(data.seasons, movieTitle, data.current, authKey, url);
+          }, 500);
+        } else {
+          Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
+          showSeasonSelector(data.seasons, movieTitle, data.current, authKey, url);
+        }
       } else if (data.hlsUrl) {
-        playHls(data.hlsUrl, movieTitle);
+        var finalUrl = addAuthKey(data.hlsUrl, authKey);
+        playHls(finalUrl, movieTitle, url);
       } else {
-        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено в ' + playerLabel);
-        if (onFailure) onFailure();
+        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено, открываем iframe...');
+        showIframePlayer(url, playerLabel, onFailure);
       }
     }).catch(function(e) {
       console.log('[iframe-cloud] ortified all proxies failed:', e.message, '- trying iframe');
@@ -509,7 +547,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.14.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.15.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -538,7 +576,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.14.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.15.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

@@ -10,13 +10,13 @@ IframeCloud.Player = (function() {
     var logger = IframeCloud.Logger;
     logger.player('Playing: ' + title + ' -> ' + url);
 
-    Lampa.Player.runas(Lampa.Storage.field('player'));
-
-    Lampa.Player.play({
+    var video = {
       title: title,
-      url: url,
-      method: 'play'
-    });
+      url: url
+    };
+
+    Lampa.Player.play(video);
+    Lampa.Player.playlist([video]);
   }
 
   return {
