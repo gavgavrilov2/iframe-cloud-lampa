@@ -1,10 +1,11 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v4.0.0');
+  console.log('[iframe-cloud] Loading v4.1.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
+  var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
 
   function proxy(url) {
     return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
@@ -68,7 +69,6 @@
   }
 
   function playNative(url, title) {
-    console.log('[iframe-cloud] Native play:', url);
     Lampa.Player.play({
       title: title || PLUGIN_NAME,
       url: url,
@@ -78,7 +78,6 @@
   }
 
   function openIframe(url, title) {
-    console.log('[iframe-cloud] Overlay:', url);
     closeOverlay();
 
     var overlay = document.createElement('div');
@@ -149,22 +148,17 @@
 
     console.log('[iframe-cloud] Fetching iframe.cloud for:', id);
 
-    fetchHtml('https://iframe.cloud/iframe/' + id)
+    fetchHtml(IFRAME_CLOUD_BASE + id)
       .then(function(html) {
-        console.log('[iframe-cloud] HTML length:', html.length);
-        console.log('[iframe-cloud] HTML snippet:', html.substring(0, 500));
         var players = extractPlayersFromHtml(html);
-        console.log('[iframe-cloud] Raw players:', players.length);
+        console.log('[iframe-cloud] Players found:', players.length);
         players = players.filter(function(p) { return !isVeoveo(p); });
-        console.log('[iframe-cloud] After Veoveo filter:', players.length);
 
         if (!players.length) {
-          console.log('[iframe-cloud] No players found in HTML');
-          Lampa.Noty.show(PLUGIN_NAME + ': нет доступных плееров');
+          console.log('[iframe-cloud] No players in HTML, opening iframe.cloud directly');
+          openIframe(IFRAME_CLOUD_BASE + id, title);
           return;
         }
-
-        console.log('[iframe-cloud] Found', players.length, 'players');
 
         var embedPromises = players.map(function(p) {
           return fetchHtml(p.url)
@@ -182,8 +176,6 @@
         Promise.all(embedPromises).then(function(results) {
           var withVideo = results.filter(function(p) { return !!p.video_url; });
           var withoutVideo = results.filter(function(p) { return !p.video_url; });
-
-          console.log('[iframe-cloud] With video:', withVideo.length, 'Without:', withoutVideo.length);
 
           if (withVideo.length === 1 && !withoutVideo.length) {
             playNative(withVideo[0].video_url, title);
@@ -226,7 +218,7 @@
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
-        Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки');
+        openIframe(IFRAME_CLOUD_BASE + id, title);
       });
   }
 
@@ -234,7 +226,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v4.0.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v4.1.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -263,7 +255,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '4.0.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '4.1.0', name: PLUGIN_NAME, description: 'Films via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
