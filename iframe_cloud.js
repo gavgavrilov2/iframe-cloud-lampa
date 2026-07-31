@@ -46,7 +46,7 @@
     var url = WORKER_URL + '/?id=' + id;
     console.log('[iframe-cloud] Fetching:', url);
 
-    window.fetch(url, { signal: AbortSignal.timeout(15000) })
+    window.fetch(url)
       .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(data) {
         var players = data.players || [];
