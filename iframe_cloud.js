@@ -5,6 +5,7 @@
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
+  var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
@@ -338,10 +339,21 @@
 
   /* ---- Process ortified embed ---- */
 
+  function fetchTextViaVercel(targetUrl) {
+    return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(targetUrl));
+  }
+
+  function fetchOrtifiedViaProxies(url) {
+    return fetchText(proxy(url)).catch(function(e) {
+      console.log('[iframe-cloud] ortified Worker failed:', e.message, '- trying Vercel');
+      return fetchTextViaVercel(url);
+    });
+  }
+
   function playOrtified(url, playerLabel, movieTitle, onFailure) {
     Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
 
-    fetchText(proxy(url)).then(function(html) {
+    fetchOrtifiedViaProxies(url).then(function(html) {
       var data = parseOrtifiedEmbed(html);
 
       if (data.seasons.length > 0) {
@@ -354,10 +366,11 @@
         if (onFailure) onFailure();
       }
     }).catch(function(e) {
-      console.log('[iframe-cloud] ortified fetch error:', e.message);
+      console.log('[iframe-cloud] ortified all proxies failed:', e.message);
       if (onFailure) onFailure();
       else {
-        showIframePlayer(url, playerLabel);
+        window.open(url, '_blank');
+        Lampa.Noty.show(PLUGIN_NAME + ': откройте в браузере');
       }
     });
   }
