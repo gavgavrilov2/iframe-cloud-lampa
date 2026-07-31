@@ -1,12 +1,27 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v1.5.0');
+  console.log('[iframe-cloud] Loading v2.0.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
 
+  var WORKER_URL = Lampa.Storage.get('iframe_cloud_worker', '');
+
+  function playNative(url, title, quality) {
+    console.log('[iframe-cloud] Playing natively:', url);
+
+    var play = {
+      title: title || PLUGIN_NAME,
+      url: url,
+      quality: quality || {},
+      callback: function() {}
+    };
+
+    Lampa.Player.play(play);
+  }
+
   function openIframe(url, title) {
-    console.log('[iframe-cloud] Opening overlay:', url);
+    console.log('[iframe-cloud] Fallback overlay:', url);
     $('.iframe-cloud-overlay').remove();
 
     var overlay = $('<div class="iframe-cloud-overlay"></div>');
@@ -21,8 +36,9 @@
     });
 
     var loading = $(
-      '<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;z-index:1;">' +
+      '<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1;color:#fff;">' +
         '<div class="broadcast__scan"><div></div></div>' +
+        '<div style="margin-top:1em;font-size:1.2em;">Загрузка плеера...</div>' +
       '</div>'
     );
 
@@ -47,69 +63,14 @@
       allow: 'autoplay; fullscreen'
     });
 
-    var videoUrl = null;
-
-    function tryExtractVideo() {
-      try {
-        var doc = iframe[0].contentDocument || iframe[0].contentWindow.document;
-        var video = doc.querySelector('video');
-        if (video && video.src) {
-          videoUrl = video.src;
-          console.log('[iframe-cloud] Video URL found:', videoUrl);
-          return true;
-        }
-        var sources = doc.querySelectorAll('source');
-        for (var i = 0; i < sources.length; i++) {
-          if (sources[i].src) {
-            videoUrl = sources[i].src;
-            console.log('[iframe-cloud] Source URL found:', videoUrl);
-            return true;
-          }
-        }
-      } catch (e) {}
-      return false;
-    }
-
     iframe.on('load', function() {
       loading.remove();
-      setTimeout(function() {
-        if (!videoUrl && tryExtractVideo()) {
-          playNative(videoUrl, title);
-          overlay.remove();
-          $(document).off('keydown.iframecloud');
-        }
-      }, 2000);
-      setTimeout(function() {
-        if (!videoUrl && tryExtractVideo()) {
-          playNative(videoUrl, title);
-          overlay.remove();
-          $(document).off('keydown.iframecloud');
-        }
-      }, 5000);
-    });
-
-    window.addEventListener('message', function handler(e) {
-      if (e.data && typeof e.data === 'string') {
-        try {
-          var data = JSON.parse(e.data);
-          if (data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1 || data.url.indexOf('video') > -1)) {
-            console.log('[iframe-cloud] postMessage video:', data.url);
-            videoUrl = data.url;
-            playNative(videoUrl, title);
-            overlay.remove();
-            $(document).off('keydown.iframecloud');
-            window.removeEventListener('message', handler);
-          }
-        } catch (err) {}
-      }
     });
 
     function closeOverlay() {
       overlay.remove();
       $(document).off('keydown.iframecloud');
-      if (Lampa.Controller) {
-        try { Lampa.Controller.toggle('full'); } catch (e) {}
-      }
+      try { Lampa.Controller.toggle('full'); } catch (e) {}
     }
 
     closeBtn.on('click hover:enter', closeOverlay);
@@ -124,33 +85,47 @@
 
     overlay.append(loading).append(iframe).append(closeBtn).append(hint);
     $('body').append(overlay);
-
     setTimeout(function() { closeBtn.focus(); }, 500);
   }
 
-  function playNative(url, title) {
-    console.log('[iframe-cloud] Playing natively:', url);
-    var play = {
-      title: title || PLUGIN_NAME,
-      url: url,
-      quality: {},
-      callback: function() {}
-    };
-
-    if (url.indexOf('.m3u8') > -1) {
-      play.url = url;
-    } else if (url.indexOf('.mp4') > -1) {
-      var base = url.replace(/_\d+\.mp4.*$/, '_');
-      var qualities = [2160, 1080, 720, 480, 360];
-      qualities.forEach(function(q) {
-        play.quality[q + 'p'] = base + q + '.mp4';
-      });
+  function fetchFromWorker(tmdbId, title, callback) {
+    if (!WORKER_URL) {
+      callback(null);
+      return;
     }
 
-    Lampa.Player.play(play);
+    var url = WORKER_URL.replace(/\/$/, '') + '/?id=' + tmdbId;
+    console.log('[iframe-cloud] Trying worker:', url);
+
+    window.fetch(url, { signal: AbortSignal.timeout(15000) })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        console.log('[iframe-cloud] Worker response:', data);
+
+        if (data.players && data.players.length) {
+          var valid = data.players.filter(function(p) { return p.url; });
+
+          if (valid.length === 1) {
+            callback({ type: 'direct', player: valid[0] });
+          } else if (valid.length > 1) {
+            callback({ type: 'select', players: valid });
+          } else {
+            callback(null);
+          }
+        } else {
+          callback(null);
+        }
+      })
+      .catch(function(e) {
+        console.log('[iframe-cloud] Worker error:', e.message);
+        callback(null);
+      });
   }
 
-  function tryFetchWithTimeout(url, callback) {
+  function tryFetchProxy(url, callback) {
     var proxies = [
       'https://api.allorigins.win/raw?url=',
       'https://corsproxy.io/?url='
@@ -162,7 +137,7 @@
         return;
       }
       var proxyUrl = proxies[i] + encodeURIComponent(url);
-      window.fetch(proxyUrl, { signal: AbortSignal.timeout(6000) })
+      window.fetch(proxyUrl, { signal: AbortSignal.timeout(5000) })
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.text();
@@ -197,35 +172,83 @@
       return;
     }
 
-    var directUrl = 'https://iframe.cloud/iframe/' + id;
     var title = movie.title || movie.name || '';
-    console.log('[iframe-cloud] Fetching players for tmdb:', id);
+    var directUrl = 'https://iframe.cloud/iframe/' + id;
+    console.log('[iframe-cloud] TMDB:', id);
 
-    tryFetchWithTimeout(directUrl, function(html) {
-      if (!html) {
-        console.log('[iframe-cloud] Proxy failed, opening directly');
-        openIframe(directUrl, title);
+    Lampa.Noty.show('Загрузка ' + PLUGIN_NAME + '...');
+
+    fetchFromWorker(id, title, function(result) {
+      if (!result) {
+        console.log('[iframe-cloud] Worker failed, trying proxy');
+
+        tryFetchProxy(directUrl, function(html) {
+          if (!html) {
+            console.log('[iframe-cloud] All failed, overlay');
+            openIframe(directUrl, title);
+            return;
+          }
+
+          var players = parsePlayers(html);
+          if (!players.length) {
+            openIframe(directUrl, title);
+            return;
+          }
+
+          if (players.length === 1) {
+            openIframe(players[0].url, title);
+            return;
+          }
+
+          Lampa.Select.show({
+            title: PLUGIN_NAME + ' — ' + title,
+            items: players.map(function(p) {
+              return { title: p.title, subtitle: title, url: p.url };
+            }),
+            onSelect: function(item) {
+              openIframe(item.url, item.title);
+            }
+          });
+        });
         return;
       }
 
-      var players = parsePlayers(html);
-      console.log('[iframe-cloud] Players found:', players.length);
-
-      if (!players.length) {
-        openIframe(directUrl, title);
-        return;
-      }
-
-      Lampa.Select.show({
-        title: PLUGIN_NAME + ' — ' + title,
-        items: players.map(function(p) {
-          return { title: p.title, subtitle: title, url: p.url };
-        }),
-        onSelect: function(item) {
-          console.log('[iframe-cloud] Opening player:', item.url);
-          openIframe(item.url, item.title);
+      if (result.type === 'direct') {
+        var p = result.player;
+        var quality = {};
+        if (p.quality) {
+          quality = p.quality;
+        } else if (p.url.indexOf('.m3u8') > -1) {
+          quality = { 'Auto': p.url };
+        } else if (p.url.indexOf('.mp4') > -1) {
+          [2160, 1080, 720, 480, 360].forEach(function(q) {
+            quality[q + 'p'] = p.url;
+          });
         }
-      });
+
+        playNative(p.url, p.title || title, quality);
+      }
+
+      if (result.type === 'select') {
+        Lampa.Select.show({
+          title: PLUGIN_NAME + ' — ' + title,
+          items: result.players.map(function(p) {
+            return {
+              title: p.title || 'Плеер',
+              subtitle: p.type || '',
+              _player: p
+            };
+          }),
+          onSelect: function(item) {
+            var p = item._player;
+            var quality = {};
+            if (p.quality) {
+              quality = p.quality;
+            }
+            playNative(p.url, p.title || title, quality);
+          }
+        });
+      }
     });
   }
 
@@ -234,7 +257,7 @@
     if (render.find('.iframe-cloud-btn').length) return;
 
     var btn = $(
-      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v1.5.0">' +
+      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.0.0">' +
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
           '<polygon points="5 3 19 12 5 21 5 3"/>' +
         '</svg>' +
@@ -291,7 +314,7 @@
 
     Lampa.Manifest.plugins = {
       type: 'video',
-      version: '1.5.0',
+      version: '2.0.0',
       name: PLUGIN_NAME,
       description: 'Фильмы через iframe.cloud',
       component: 'iframe_cloud',
@@ -302,6 +325,43 @@
         openPlugin(obj);
       }
     };
+
+    Lampa.Params.input('iframe_cloud_worker', '', 'URL Cloudflare Worker');
+    Lampa.SettingsApi.addComponent({
+      component: 'iframe_cloud_settings',
+      name: PLUGIN_NAME,
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
+    });
+
+    Lampa.Template.add('settings_iframe_cloud', '<div>' +
+      '<div class="settings-param selector" data-name="iframe_cloud_worker" data-type="input" placeholder="https://my-worker.user.workers.dev">' +
+        '<div class="settings-param__name">URL Cloudflare Worker</div>' +
+        '<div class="settings-param__value"></div>' +
+        '<div class="settings-param__descr">Адрес вашего Worker для парсинга iframe.cloud</div>' +
+      '</div>' +
+    '</div>');
+
+    Lampa.Listener.follow('settings', function(e) {
+      if (e.name == 'iframe_cloud_settings') {
+        e.body.find('[data-name="iframe_cloud_worker"]').unbind('hover:enter').on('hover:enter', function() {
+          var input = $(this);
+          var current = Lampa.Storage.get('iframe_cloud_worker', '');
+          Lampa.Input.show({
+            title: 'URL Worker',
+            value: current,
+            place: 'https://my-worker.user.workers.dev',
+            onSelect: function(val) {
+              WORKER_URL = val;
+              Lampa.Storage.set('iframe_cloud_worker', val);
+              input.find('.settings-param__value').text(val || 'Не задан');
+              Lampa.Controller.toggle('settings_component');
+            }
+          });
+        });
+
+        e.body.find('[data-name="iframe_cloud_worker"] .settings-param__value').text(WORKER_URL || 'Не задан');
+      }
+    });
 
     Lampa.Listener.follow('full', function(e) {
       if (e.type == 'complite') {
