@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.16.0');
+  console.log('[iframe-cloud] Loading v5.17.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -135,7 +135,6 @@
         .then(function(d) {
           if (!d.docs || !d.docs.length) return null;
           var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
-          console.log('[iframe-cloud] KP candidates:', d.docs.map(function(m) { return m.id + (m.name ? '(' + m.name + ')' : ''); }).join(', '));
           return best && best.id || null;
         })
         .catch(function() { return null; });
@@ -176,7 +175,166 @@
     return s.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
   }
 
-  /* ---- iframe player overlay ---- */
+  /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
+
+  function playHlsProxied(hlsUrl, title) {
+    var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
+    console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
+    var video = {
+      url: proxyUrl,
+      title: title || PLUGIN_NAME,
+      subtitles: []
+    };
+    Lampa.Player.play(video);
+    Lampa.Player.playlist([video]);
+  }
+
+  /* ---- ortified embed parsing ---- */
+
+  function extractArray(str, startIdx) {
+    var depth = 0, inStr = false, ch = '', esc = false;
+    for (var i = startIdx; i < str.length; i++) {
+      ch = str[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (inStr) { if (ch === '"') inStr = false; continue; }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '[') depth++;
+      else if (ch === ']') { depth--; if (depth === 0) return str.substring(startIdx, i + 1); }
+    }
+    return null;
+  }
+
+  function extractObject(str, startIdx) {
+    var depth = 0, inStr = false, ch = '', esc = false;
+    for (var i = startIdx; i < str.length; i++) {
+      ch = str[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (inStr) { if (ch === '"') inStr = false; continue; }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) return str.substring(startIdx, i + 1); }
+    }
+    return null;
+  }
+
+  function parseOrtifiedEmbed(html) {
+    var result = { seasons: [], hlsUrl: null, current: null };
+
+    var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!mkMatch) return result;
+
+    var mkScript = mkMatch[1];
+
+    var seasonsIdx = mkScript.indexOf('"seasons":[');
+    if (seasonsIdx === -1) seasonsIdx = mkScript.indexOf('seasons:[');
+    if (seasonsIdx === -1) seasonsIdx = mkScript.indexOf('seasons: [');
+
+    if (seasonsIdx !== -1) {
+      var arrStart = mkScript.indexOf('[', seasonsIdx);
+      var arrStr = extractArray(mkScript, arrStart);
+      if (arrStr) {
+        try {
+          result.seasons = JSON.parse(arrStr);
+          console.log('[iframe-cloud] Parsed', result.seasons.length, 'seasons from ortified');
+        } catch (e) {
+          console.log('[iframe-cloud] seasons JSON parse error:', e.message);
+        }
+      }
+    }
+
+    var currentIdx = mkScript.indexOf('"current":{');
+    if (currentIdx === -1) currentIdx = mkScript.indexOf('current:{');
+    if (currentIdx === -1) currentIdx = mkScript.indexOf('current: {');
+    if (currentIdx !== -1) {
+      var objStart = mkScript.indexOf('{', currentIdx);
+      var objStr = extractObject(mkScript, objStart);
+      if (objStr) {
+        var fixed = objStr.replace(/"(\w+)"\s*:/g, '"$1":').replace(/'(\w+)'\s*:/g, '"$1":').replace(/,\s*([}\]])/g, '$1');
+        try { result.current = JSON.parse(fixed); } catch (e) {}
+      }
+    }
+
+    if (!result.seasons.length) {
+      var hlsMatch = mkScript.match(/"hls"\s*:\s*"([^"]+)"/);
+      if (!hlsMatch) hlsMatch = mkScript.match(/hls\s*:\s*"([^"]+)"/);
+      if (hlsMatch) {
+        result.hlsUrl = hlsMatch[1];
+        console.log('[iframe-cloud] Parsed single HLS URL from ortified');
+      }
+    }
+
+    return result;
+  }
+
+  /* ---- Episode/Season UI with proxied HLS ---- */
+
+  function showEpisodeSelector(seasons, title, current) {
+    var items = [];
+    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
+
+    for (var s = 0; s < sorted.length; s++) {
+      var season = sorted[s];
+      var sNum = season.season || (s + 1);
+      var eps = season.episodes || [];
+
+      for (var e = 0; e < eps.length; e++) {
+        var ep = eps[e];
+        var eNum = ep.episode || (e + 1);
+        var hls = ep.hls || '';
+        var dur = ep.duration ? Math.round(ep.duration / 60) + ' \u043c\u0438\u043d' : '';
+        var isCur = current && current.season == sNum && current.episode == eNum;
+
+        if (hls) {
+          items.push({
+            title: (isCur ? '\u25b6 ' : '') + 'S' + sNum + 'E' + eNum,
+            subtitle: dur,
+            _hls: hls,
+            _label: 'S' + sNum + 'E' + eNum
+          });
+        }
+      }
+    }
+
+    if (!items.length) { Lampa.Noty.show(PLUGIN_NAME + ': \u043d\u0435\u0442 \u044d\u043f\u0438\u0437\u043e\u0434\u043e\u0432'); return; }
+
+    Lampa.Select.show({
+      title: PLUGIN_NAME + ' \u2014 ' + title,
+      items: items,
+      onSelect: function(item) { playHlsProxied(item._hls, item._label + ' ' + title); }
+    });
+  }
+
+  function showSeasonSelector(seasons, title, current) {
+    var items = [];
+    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
+
+    for (var s = 0; s < sorted.length; s++) {
+      var season = sorted[s];
+      var sNum = season.season || (s + 1);
+      items.push({
+        title: '\u0421\u0435\u0437\u043e\u043d ' + sNum,
+        subtitle: (season.episodes || []).length + ' \u044d\u043f\u0438\u0437\u043e\u0434\u043e\u0432',
+        _season: season, _sNum: sNum
+      });
+    }
+
+    Lampa.Select.show({
+      title: PLUGIN_NAME + ' \u2014 ' + title,
+      items: items,
+      onSelect: function(item) {
+        var eps = item._season.episodes || [];
+        if (eps.length === 1 && eps[0].hls) {
+          playHlsProxied(eps[0].hls, 'S' + item._sNum + 'E1 ' + title);
+        } else {
+          showEpisodeSelector([item._season], title, current);
+        }
+      }
+    });
+  }
+
+  /* ---- iframe fallback (for non-ortified players or failures) ---- */
 
   function showIframePlayer(url, label, onClose) {
     var overlay = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
@@ -190,7 +348,6 @@
       removed = true;
       overlay.remove();
       document.removeEventListener('keydown', keyHandler);
-      console.log('[iframe-cloud] iframe player closed');
       if (onClose) onClose();
     }
 
@@ -205,8 +362,58 @@
 
     overlay.append(iframe).append(closeBtn);
     $('body').append(overlay);
+  }
 
-    console.log('[iframe-cloud] iframe player opened:', label);
+  /* ---- Process ortified embed ---- */
+
+  function fetchTextViaVercel(targetUrl) {
+    return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(targetUrl));
+  }
+
+  function fetchOrtifiedViaProxies(url) {
+    return fetchTextViaVercel(url)
+      .catch(function(e) {
+        console.log('[iframe-cloud] Vercel failed:', e.message, '- trying Worker');
+        return fetchText(proxy(url));
+      });
+  }
+
+  function playOrtified(url, playerLabel, movieTitle, onFailure) {
+    Lampa.Noty.show(PLUGIN_NAME + ': \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 ' + playerLabel + '...');
+
+    fetchOrtifiedViaProxies(url).then(function(html) {
+      var data = parseOrtifiedEmbed(html);
+
+      if (data.seasons.length > 0) {
+        Lampa.Noty.show(PLUGIN_NAME + ': \u0441\u0435\u0440\u0438\u0430\u043b, ' + data.seasons.length + ' \u0441\u0435\u0437\u043e\u043d(\u043e\u0432)');
+        showSeasonSelector(data.seasons, movieTitle, data.current);
+      } else if (data.hlsUrl) {
+        playHlsProxied(data.hlsUrl, movieTitle);
+      } else {
+        Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c iframe...');
+        showIframePlayer(url, playerLabel, onFailure);
+      }
+    }).catch(function(e) {
+      console.log('[iframe-cloud] ortified failed:', e.message, '- trying iframe');
+      showIframePlayer(url, playerLabel, function() {
+        if (onFailure) onFailure();
+      });
+    });
+  }
+
+  /* ---- Auto-try next player ---- */
+
+  function tryNextPlayer(players, currentIndex, movieTitle) {
+    for (var i = currentIndex + 1; i < players.length; i++) {
+      var np = players[i];
+      if (isVeoveo(np)) continue;
+      var label = np.source + ' (' + (np.translate || '') + ')';
+      Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u0440\u043e\u0431\u0443\u0435\u043c ' + label + '...');
+      showIframePlayer(np.url, label);
+      return true;
+    }
+    Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0441\u0435 \u043f\u043b\u0435\u0435\u0440\u044b \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b');
+    return false;
   }
 
   /* ---- Main flow ---- */
@@ -260,9 +467,17 @@
               }
 
               var p = item._player;
-              var label = p.source + ' (' + (p.translate || '') + ')';
-              console.log('[iframe-cloud] Opening:', label, p.url);
-              showIframePlayer(p.url, label);
+              var pLabel = p.source + ' (' + (p.translate || '') + ')';
+
+              var isOrt = (p.url || '').indexOf('ortified.ws') !== -1;
+
+              if (isOrt) {
+                playOrtified(p.url, pLabel, title, function() {
+                  tryNextPlayer(players, item._index, title);
+                });
+              } else {
+                showIframePlayer(p.url, pLabel);
+              }
             }
           });
         });
@@ -279,7 +494,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.16.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.17.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -308,7 +523,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.16.0', name: PLUGIN_NAME, description: 'Watch via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.17.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
