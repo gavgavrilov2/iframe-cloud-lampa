@@ -1,13 +1,14 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.4.1');
+  console.log('[iframe-cloud] Loading v5.5.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
+  var IFRAME_CLOUD_API = 'https://iframe.cloud/lampac-api.php';
 
   function proxy(url) {
     return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
@@ -24,12 +25,16 @@
     });
   }
 
-  function fetchJsonViaWorker(url) {
-    return fetchText(proxyApi(url)).then(function(t) { return JSON.parse(t); });
+  function fetchJson(url) {
+    return fetchText(url).then(function(t) { return JSON.parse(t); });
   }
 
-  function fetchHtml(url) {
-    return fetchText(proxy(url));
+  function fetchJsonViaWorker(url) {
+    return fetchJson(proxyApi(url));
+  }
+
+  function fetchJsonViaProxy(url) {
+    return fetchJson(proxy(url));
   }
 
   /* ---- Kinopoisk ID ---- */
@@ -47,117 +52,75 @@
       .catch(function() { return null; });
   }
 
-  /* ---- iframe.cloud player tabs ---- */
+  /* ---- iframe.cloud players API ---- */
 
-  function extractPlayersFromHtml(html) {
-    var players = [], seen = {}, m;
-    var re = /data-value="(https?:\/\/[^"]+)"[^>]*>([^<]*)/g;
-    while ((m = re.exec(html)) !== null) {
-      var url = m[1].replace(/&amp;/g, '&').trim();
-      var title = m[2].replace(/&amp;/g, '&').trim();
-      if (!seen[url]) { seen[url] = true; players.push({ url: url, title: title || 'Плеер' }); }
-    }
-    return players;
+  function getPlayers(kpId) {
+    var url = IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId;
+    console.log('[iframe-cloud] Fetching players:', url);
+    return fetchJsonViaProxy(url)
+      .then(function(data) {
+        var players = data.players || [];
+        console.log('[iframe-cloud] Got', players.length, 'players');
+        return players;
+      });
   }
 
   function isVeoveo(p) {
-    var t = (p.title || '').toLowerCase();
+    var s = (p.source || '').toLowerCase();
     var u = (p.url || '').toLowerCase();
-    return t.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
+    return s.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
   }
 
-  function isOrtified(url) {
-    return url.indexOf('ortified.ws') !== -1;
+  function isOrtified(p) {
+    var u = (p.url || '').toLowerCase();
+    return u.indexOf('ortified.ws') !== -1;
   }
 
   /* ---- ortified.ws embed parsing ---- */
 
   function extractBraces(str, startIdx) {
-    var depth = 0;
-    var inString = false;
-    var stringChar = '';
-    var escaped = false;
+    var depth = 0, inStr = false, ch = '', esc = false;
     for (var i = startIdx; i < str.length; i++) {
-      var ch = str[i];
-      if (escaped) { escaped = false; continue; }
-      if (ch === '\\') { escaped = true; continue; }
-      if (inString) {
-        if (ch === stringChar) inString = false;
-        continue;
-      }
-      if (ch === '"' || ch === "'") { inString = true; stringChar = ch; continue; }
+      ch = str[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (inStr) { if (ch === '"') inStr = false; continue; }
+      if (ch === '"') { inStr = true; continue; }
       if (ch === '{') depth++;
-      else if (ch === '}') {
-        depth--;
-        if (depth === 0) return str.substring(startIdx, i + 1);
-      }
+      else if (ch === '}') { depth--; if (depth === 0) return str.substring(startIdx, i + 1); }
     }
     return null;
   }
 
   function parseOrtifiedEmbed(html) {
-    var result = { type: 'unknown', seasons: [], hlsUrl: null };
+    var result = { seasons: [], hlsUrl: null };
 
     var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
-    if (!mkMatch) {
-      console.log('[iframe-cloud] No <script data-name="mk"> found');
-      return result;
-    }
+    if (!mkMatch) return result;
 
     var mkScript = mkMatch[1];
+    var idx = mkScript.indexOf('makePlayer(');
+    if (idx === -1) return result;
 
-    var makePlayerIdx = mkScript.indexOf('makePlayer(');
-    if (makePlayerIdx === -1) {
-      console.log('[iframe-cloud] No makePlayer() found');
-      return result;
-    }
-
-    var objStart = mkScript.indexOf('{', makePlayerIdx);
+    var objStart = mkScript.indexOf('{', idx);
     if (objStart === -1) return result;
 
     var objStr = extractBraces(mkScript, objStart);
-    if (!objStr) {
-      console.log('[iframe-cloud] Failed to extract makePlayer object');
-      return result;
-    }
+    if (!objStr) return result;
 
-    // Fix trailing commas before } or ]
     var fixed = objStr.replace(/,\s*([\]}])/g, '$1');
 
     try {
       var opts = JSON.parse(fixed);
-      console.log('[iframe-cloud] makePlayer parsed OK, keys:', Object.keys(opts).join(', '));
-
-      // Extract ec09db54317181 token for URL auth
-      var tokenMatch = mkScript.match(/ec09db54317181\s*=\s*["']([^"']+)["']/);
-      var ecToken = tokenMatch ? tokenMatch[1] : null;
 
       if (opts.playlist && opts.playlist.seasons) {
-        result.type = 'series';
         result.seasons = opts.playlist.seasons;
         result.current = opts.playlist.current || null;
-        result.ecToken = ecToken;
-        console.log('[iframe-cloud] Seasons:', opts.playlist.seasons.length);
-      } else if (opts.source) {
-        result.type = 'movie';
-        if (opts.source.hls) {
-          result.hlsUrl = opts.source.hls + (ecToken ? '&' + ecToken : '');
-        }
+      } else if (opts.source && opts.source.hls) {
+        result.hlsUrl = opts.source.hls;
       }
     } catch (e) {
-      console.log('[iframe-cloud] JSON parse error:', e.message);
-
-      // Fallback: try to find hls URL directly
-      var hlsRe = /"hls"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/g;
-      var hm;
-      var urls = [];
-      while ((hm = hlsRe.exec(objStr)) !== null) {
-        urls.push(hm[1]);
-      }
-      if (urls.length > 0) {
-        result.type = 'movie';
-        result.hlsUrl = urls[0];
-      }
+      console.log('[iframe-cloud] ortified JSON parse error:', e.message);
     }
 
     return result;
@@ -166,13 +129,8 @@
   /* ---- Lampa Player ---- */
 
   function playHls(url, title) {
-    console.log('[iframe-cloud] Playing HLS:', url.substring(0, 80) + '...');
-    Lampa.Player.play({
-      url: url,
-      title: title || PLUGIN_NAME,
-      quality: true,
-      subtitles: []
-    });
+    console.log('[iframe-cloud] Playing HLS:', url.substring(0, 80));
+    Lampa.Player.play({ url: url, title: title || PLUGIN_NAME, quality: true, subtitles: [] });
     Lampa.Player.run();
   }
 
@@ -180,66 +138,51 @@
 
   function showEpisodeSelector(seasons, title, current) {
     var items = [];
-
-    // Sort seasons by number
-    var sorted = seasons.slice().sort(function(a, b) {
-      return (a.season || 0) - (b.season || 0);
-    });
+    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
     for (var s = 0; s < sorted.length; s++) {
       var season = sorted[s];
-      var seasonNum = season.season || (s + 1);
-      var episodes = season.episodes || [];
+      var sNum = season.season || (s + 1);
+      var eps = season.episodes || [];
 
-      for (var e = 0; e < episodes.length; e++) {
-        var ep = episodes[e];
-        var epNum = ep.episode || (e + 1);
-        var epTitle = ep.title || ('Эпизод ' + epNum);
+      for (var e = 0; e < eps.length; e++) {
+        var ep = eps[e];
+        var eNum = ep.episode || (e + 1);
         var hls = ep.hls || '';
-        var duration = ep.duration ? Math.round(ep.duration / 60) + ' мин' : '';
+        var dur = ep.duration ? Math.round(ep.duration / 60) + ' мин' : '';
+        var isCur = current && current.season == sNum && current.episode == eNum;
 
         if (hls) {
-          var isCurrent = current && current.season == seasonNum && current.episode == epNum;
           items.push({
-            title: (isCurrent ? '► ' : '') + 'S' + seasonNum + 'E' + epNum + ' — ' + epTitle,
-            subtitle: duration,
+            title: (isCur ? '► ' : '') + 'S' + sNum + 'E' + eNum,
+            subtitle: dur,
             _hls: hls,
-            _epTitle: 'S' + seasonNum + 'E' + epNum + ' ' + epTitle,
-            _season: seasonNum,
-            _episode: epNum
+            _label: 'S' + sNum + 'E' + eNum
           });
         }
       }
     }
 
-    if (items.length === 0) {
-      Lampa.Noty.show(PLUGIN_NAME + ': нет доступных эпизодов');
-      return;
-    }
+    if (!items.length) { Lampa.Noty.show(PLUGIN_NAME + ': нет эпизодов'); return; }
 
     Lampa.Select.show({
       title: PLUGIN_NAME + ' — ' + title,
       items: items,
-      onSelect: function(item) { playHls(item._hls, item._epTitle); }
+      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title); }
     });
   }
 
   function showSeasonSelector(seasons, title, current) {
     var items = [];
-    var sorted = seasons.slice().sort(function(a, b) {
-      return (a.season || 0) - (b.season || 0);
-    });
+    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
     for (var s = 0; s < sorted.length; s++) {
       var season = sorted[s];
-      var seasonNum = season.season || (s + 1);
-      var epCount = (season.episodes || []).length;
-
+      var sNum = season.season || (s + 1);
       items.push({
-        title: 'Сезон ' + seasonNum,
-        subtitle: epCount + ' эпизодов',
-        _season: season,
-        _seasonNum: seasonNum
+        title: 'Сезон ' + sNum,
+        subtitle: (season.episodes || []).length + ' эпизодов',
+        _season: season, _sNum: sNum
       });
     }
 
@@ -247,62 +190,35 @@
       title: PLUGIN_NAME + ' — ' + title,
       items: items,
       onSelect: function(item) {
-        var episodes = item._season.episodes || [];
-        if (episodes.length === 1) {
-          var ep = episodes[0];
-          playHls(ep.hls, ep.title || 'S' + item._seasonNum + 'E1');
-        } else {
-          showEpisodeSelector([item._season], title, current);
-        }
+        var eps = item._season.episodes || [];
+        if (eps.length === 1) { playHls(eps[0].hls, 'S' + item._sNum + 'E1 ' + title); }
+        else { showEpisodeSelector([item._season], title, current); }
       }
     });
   }
 
-  /* ---- Process embed page ---- */
+  /* ---- Process ortified embed ---- */
 
-  function processOrtifiedEmbed(html, movieTitle) {
-    var data = parseOrtifiedEmbed(html);
-    console.log('[iframe-cloud] Result:', data.type, 'seasons:', data.seasons.length, 'hls:', data.hlsUrl ? 'yes' : 'no');
+  function playOrtified(url, playerLabel, movieTitle) {
+    Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
 
-    if (data.type === 'series' && data.seasons.length > 0) {
-      Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
-      showSeasonSelector(data.seasons, movieTitle, data.current);
-    } else if (data.hlsUrl) {
-      Lampa.Noty.show(PLUGIN_NAME + ': видео найдено');
-      playHls(data.hlsUrl, movieTitle);
-    } else {
-      Lampa.Noty.show(PLUGIN_NAME + ': не удалось извлечь видео');
-    }
-  }
+    fetchText(proxy(url)).then(function(html) {
+      var data = parseOrtifiedEmbed(html);
 
-  function processGenericEmbed(html, movieTitle) {
-    var hlsRe = /https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*/gi;
-    var matches = html.match(hlsRe) || [];
-    var unique = [];
-    var seen = {};
-    for (var i = 0; i < matches.length; i++) {
-      var url = matches[i].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
-      if (!seen[url]) { seen[url] = true; unique.push(url); }
-    }
-
-    if (unique.length > 0) {
-      Lampa.Noty.show(PLUGIN_NAME + ': видео найдено');
-      if (unique.length === 1) {
-        playHls(unique[0], movieTitle);
+      if (data.seasons.length > 0) {
+        Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
+        showSeasonSelector(data.seasons, movieTitle, data.current);
+      } else if (data.hlsUrl) {
+        playHls(data.hlsUrl, movieTitle);
       } else {
-        var items = unique.map(function(url, idx) {
-          var q = url.match(/(\d{3,4}p)/i);
-          return { title: q ? q[1] : 'Источник ' + (idx + 1), _hls: url };
-        });
-        Lampa.Select.show({
-          title: PLUGIN_NAME + ' — ' + movieTitle,
-          items: items,
-          onSelect: function(item) { playHls(item._hls, movieTitle); }
-        });
+        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено, откройте в браузере');
+        window.open(url, '_blank');
       }
-    } else {
-      Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено');
-    }
+    }).catch(function(e) {
+      console.log('[iframe-cloud] ortified fetch error:', e.message);
+      Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки');
+      window.open(url, '_blank');
+    });
   }
 
   /* ---- Main flow ---- */
@@ -316,47 +232,53 @@
 
     getKinopoiskId(movie)
       .then(function(kpId) {
-        var targetId = kpId || id;
-        var idType = kpId ? 'KP:' + kpId : 'TMDB:' + id;
-        console.log('[iframe-cloud] Using ID:', idType);
+        if (!kpId) {
+          Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID не найден');
+          return;
+        }
 
-        return fetchHtml(IFRAME_CLOUD_BASE + targetId).then(function(html) {
-          var players = extractPlayersFromHtml(html);
+        console.log('[iframe-cloud] KP ID:', kpId);
+
+        return getPlayers(kpId).then(function(players) {
           players = players.filter(function(p) { return !isVeoveo(p); });
 
-          if (players.length === 0) {
+          if (!players.length) {
             Lampa.Noty.show(PLUGIN_NAME + ': плееры не найдены');
             return;
           }
 
-          var items = players.map(function(p) {
-            return { title: p.title, subtitle: p.url.substring(0, 50), _url: p.url };
+          var items = players.map(function(p, i) {
+            return {
+              title: p.source + ' — ' + (p.translate || ''),
+              subtitle: p.quality || '',
+              _player: p, _index: i
+            };
           });
 
-          items.push({ title: '🌐 Открыть в браузере', subtitle: 'iframe.cloud', _browser: true, _cloudUrl: IFRAME_CLOUD_BASE + targetId });
+          items.push({
+            title: '🌐 Открыть в браузере',
+            subtitle: 'iframe.cloud',
+            _browser: true,
+            _cloudUrl: IFRAME_CLOUD_BASE + kpId
+          });
 
           Lampa.Select.show({
             title: PLUGIN_NAME + ' — ' + title,
             items: items,
             onSelect: function(item) {
               if (item._browser) {
-                window.open(item._cloudUrl || item._url, '_blank');
-                Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
+                window.open(item._cloudUrl, '_blank');
                 return;
               }
 
-              Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + item.title + '...');
+              var p = item._player;
 
-              fetchHtml(item._url).then(function(embedHtml) {
-                if (isOrtified(item._url)) {
-                  processOrtifiedEmbed(embedHtml, title);
-                } else {
-                  processGenericEmbed(embedHtml, title);
-                }
-              }).catch(function(e) {
-                console.log('[iframe-cloud] embed error:', e.message);
-                Lampa.Noty.show(PLUGIN_NAME + ': ' + item.title + ' недоступен');
-              });
+              if (isOrtified(p)) {
+                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title);
+              } else {
+                window.open(p.url, '_blank');
+                Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
+              }
             }
           });
         });
@@ -373,7 +295,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.4.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.5.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -402,7 +324,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.4.0', name: PLUGIN_NAME, description: 'Native HLS playback via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.5.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
