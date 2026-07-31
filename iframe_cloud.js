@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.13.0');
+  console.log('[iframe-cloud] Loading v5.14.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -375,14 +375,14 @@
   }
 
   function fetchOrtifiedViaProxies(url) {
-    return fetchText(DENO_PROXY_URL + '/?proxy=' + encodeURIComponent(url))
+    return fetchTextViaVercel(url)
       .catch(function(e) {
-        console.log('[iframe-cloud] Deno failed:', e.message, '- trying Worker');
+        console.log('[iframe-cloud] Vercel failed:', e.message, '- trying Worker');
         return fetchText(proxy(url));
       })
       .catch(function(e) {
-        console.log('[iframe-cloud] Worker failed:', e.message, '- trying Vercel');
-        return fetchTextViaVercel(url);
+        console.log('[iframe-cloud] Worker failed:', e.message, '- trying Deno');
+        return fetchText(DENO_PROXY_URL + '/?proxy=' + encodeURIComponent(url));
       });
   }
 
@@ -509,7 +509,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.13.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.14.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -538,7 +538,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.13.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.14.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
