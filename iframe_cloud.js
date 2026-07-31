@@ -1,11 +1,12 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.11.0');
+  console.log('[iframe-cloud] Loading v5.12.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
+  var DENO_PROXY_URL = 'https://iframe-cloud-proxy.gavgavrilov2.deno.net';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
@@ -345,10 +346,15 @@
   }
 
   function fetchOrtifiedViaProxies(url) {
-    return fetchText(proxy(url)).catch(function(e) {
-      console.log('[iframe-cloud] ortified Worker failed:', e.message, '- trying Vercel');
-      return fetchTextViaVercel(url);
-    });
+    return fetchText(DENO_PROXY_URL + '/?proxy=' + encodeURIComponent(url))
+      .catch(function(e) {
+        console.log('[iframe-cloud] Deno failed:', e.message, '- trying Worker');
+        return fetchText(proxy(url));
+      })
+      .catch(function(e) {
+        console.log('[iframe-cloud] Worker failed:', e.message, '- trying Vercel');
+        return fetchTextViaVercel(url);
+      });
   }
 
   function playOrtified(url, playerLabel, movieTitle, onFailure) {
@@ -474,7 +480,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.11.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.12.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -503,7 +509,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.11.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.12.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
