@@ -1,12 +1,11 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.15.0');
+  console.log('[iframe-cloud] Loading v5.16.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
-  var DENO_PROXY_URL = 'https://iframe-cloud-proxy.gavgavrilov2.deno.net';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
@@ -19,10 +18,6 @@
 
   function proxyKpu(url) {
     return WORKER_URL + '/?kpu=' + encodeURIComponent(url);
-  }
-
-  function proxyApi(url) {
-    return WORKER_URL + '/?api=' + encodeURIComponent(url) + '&apikey=' + encodeURIComponent(KP_API_TOKEN);
   }
 
   function fetchText(url) {
@@ -181,186 +176,13 @@
     return s.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
   }
 
-  function isOrtified(p) {
-    var u = (p.url || '').toLowerCase();
-    return u.indexOf('ortified.ws') !== -1;
-  }
-
-  /* ---- ortified.ws embed parsing ---- */
-
-  function extractArray(str, startIdx) {
-    var depth = 0, inStr = false, ch = '', esc = false;
-    for (var i = startIdx; i < str.length; i++) {
-      ch = str[i];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\') { esc = true; continue; }
-      if (inStr) { if (ch === '"') inStr = false; continue; }
-      if (ch === '"') { inStr = true; continue; }
-      if (ch === '[') depth++;
-      else if (ch === ']') { depth--; if (depth === 0) return str.substring(startIdx, i + 1); }
-    }
-    return null;
-  }
-
-  function extractObject(str, startIdx) {
-    var depth = 0, inStr = false, ch = '', esc = false;
-    for (var i = startIdx; i < str.length; i++) {
-      ch = str[i];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\') { esc = true; continue; }
-      if (inStr) { if (ch === '"') inStr = false; continue; }
-      if (ch === '"') { inStr = true; continue; }
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) return str.substring(startIdx, i + 1); }
-    }
-    return null;
-  }
-
-  function parseOrtifiedEmbed(html) {
-    var result = { seasons: [], hlsUrl: null, current: null, authKey: null };
-
-    var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
-    if (!mkMatch) return result;
-
-    var mkScript = mkMatch[1];
-
-    var authMatch = mkScript.match(/var\s+\w+\s*=\s*"([a-f0-9]{8,})"/);
-    if (authMatch) { result.authKey = authMatch[1]; }
-
-    var seasonsIdx = mkScript.indexOf('"seasons":[');
-    if (seasonsIdx === -1) seasonsIdx = mkScript.indexOf('seasons:[');
-    if (seasonsIdx === -1) seasonsIdx = mkScript.indexOf('seasons: [');
-
-    if (seasonsIdx !== -1) {
-      var arrStart = mkScript.indexOf('[', seasonsIdx);
-      var arrStr = extractArray(mkScript, arrStart);
-      if (arrStr) {
-        try {
-          result.seasons = JSON.parse(arrStr);
-          console.log('[iframe-cloud] Parsed', result.seasons.length, 'seasons from ortified');
-        } catch (e) {
-          console.log('[iframe-cloud] seasons JSON parse error:', e.message);
-        }
-      }
-    }
-
-    var currentIdx = mkScript.indexOf('"current":{');
-    if (currentIdx === -1) currentIdx = mkScript.indexOf('current:{');
-    if (currentIdx === -1) currentIdx = mkScript.indexOf('current: {');
-    if (currentIdx !== -1) {
-      var objStart = mkScript.indexOf('{', currentIdx);
-      var objStr = extractObject(mkScript, objStart);
-      if (objStr) {
-        var fixed = objStr.replace(/"(\w+)"\s*:/g, '"$1":').replace(/'(\w+)'\s*:/g, '"$1":').replace(/,\s*([}\]])/g, '$1');
-        try { result.current = JSON.parse(fixed); } catch (e) {}
-      }
-    }
-
-    if (!result.seasons.length) {
-      var hlsMatch = mkScript.match(/"hls"\s*:\s*"([^"]+)"/);
-      if (!hlsMatch) hlsMatch = mkScript.match(/hls\s*:\s*"([^"]+)"/);
-      if (hlsMatch) {
-        result.hlsUrl = hlsMatch[1];
-        console.log('[iframe-cloud] Parsed HLS URL from ortified');
-      }
-    }
-
-    return result;
-  }
-
-  /* ---- Lampa Player ---- */
-
-  function addAuthKey(url, key) {
-    if (!url || !key) return url;
-    if (url.indexOf(key) !== -1) return url;
-    return url + (url.indexOf('?') !== -1 ? '&' : '?') + key;
-  }
-
-  function playHls(url, title, embedUrl, onFailure) {
-    console.log('[iframe-cloud] Playing HLS:', url.substring(0, 80));
-    var video = {
-      url: url,
-      title: title || PLUGIN_NAME,
-      quality: true,
-      subtitles: []
-    };
-    Lampa.Player.play(video);
-    Lampa.Player.playlist([video]);
-  }
-
-  /* ---- Episode/Season UI ---- */
-
-  function showEpisodeSelector(seasons, title, current, authKey, embedUrl) {
-    var items = [];
-    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
-
-    for (var s = 0; s < sorted.length; s++) {
-      var season = sorted[s];
-      var sNum = season.season || (s + 1);
-      var eps = season.episodes || [];
-
-      for (var e = 0; e < eps.length; e++) {
-        var ep = eps[e];
-        var eNum = ep.episode || (e + 1);
-        var hls = ep.hls ? addAuthKey(ep.hls, authKey) : '';
-        var dur = ep.duration ? Math.round(ep.duration / 60) + ' мин' : '';
-        var isCur = current && current.season == sNum && current.episode == eNum;
-
-        if (hls) {
-          items.push({
-            title: (isCur ? '► ' : '') + 'S' + sNum + 'E' + eNum,
-            subtitle: dur,
-            _hls: hls,
-            _label: 'S' + sNum + 'E' + eNum
-          });
-        }
-      }
-    }
-
-    if (!items.length) { Lampa.Noty.show(PLUGIN_NAME + ': нет эпизодов'); return; }
-
-    Lampa.Select.show({
-      title: PLUGIN_NAME + ' — ' + title,
-      items: items,
-      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title, embedUrl); }
-    });
-  }
-
-  function showSeasonSelector(seasons, title, current, authKey, embedUrl) {
-    var items = [];
-    var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
-
-    for (var s = 0; s < sorted.length; s++) {
-      var season = sorted[s];
-      var sNum = season.season || (s + 1);
-      items.push({
-        title: 'Сезон ' + sNum,
-        subtitle: (season.episodes || []).length + ' эпизодов',
-        _season: season, _sNum: sNum
-      });
-    }
-
-    Lampa.Select.show({
-      title: PLUGIN_NAME + ' — ' + title,
-      items: items,
-      onSelect: function(item) {
-        var eps = item._season.episodes || [];
-        if (eps.length === 1) {
-          var hls = eps[0].hls ? addAuthKey(eps[0].hls, authKey) : '';
-          playHls(hls, 'S' + item._sNum + 'E1 ' + title, embedUrl);
-        } else {
-          showEpisodeSelector([item._season], title, current, authKey, embedUrl);
-        }
-      }
-    });
-  }
-
-  /* ---- iframe player (inline, not new tab) ---- */
+  /* ---- iframe player overlay ---- */
 
   function showIframePlayer(url, label, onClose) {
     var overlay = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
-    var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">✕ Закрыть</div>');
-    var iframe = $('<iframe src="' + url + '" style="width:100%;height:100%;border:none;" allowfullscreen="true" allow="autoplay; fullscreen"></iframe>');
+    var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">\u2715 \u0417\u0430\u043a\u0440\u044b\u0442\u044c</div>');
+    var iframe = $('<iframe src="" style="width:100%;height:100%;border:none;" allowfullscreen="true" allow="autoplay; fullscreen"></iframe>');
+    iframe.attr('src', url);
 
     var removed = false;
     function close() {
@@ -387,104 +209,19 @@
     console.log('[iframe-cloud] iframe player opened:', label);
   }
 
-  /* ---- Process ortified embed ---- */
-
-  function fetchTextViaVercel(targetUrl) {
-    return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(targetUrl));
-  }
-
-  function fetchOrtifiedViaProxies(url) {
-    return fetchTextViaVercel(url)
-      .catch(function(e) {
-        console.log('[iframe-cloud] Vercel failed:', e.message, '- trying Worker');
-        return fetchText(proxy(url));
-      })
-      .catch(function(e) {
-        console.log('[iframe-cloud] Worker failed:', e.message, '- trying Deno');
-        return fetchText(DENO_PROXY_URL + '/?proxy=' + encodeURIComponent(url));
-      });
-  }
-
-  function playOrtified(url, playerLabel, movieTitle, onFailure) {
-    Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
-
-    fetchOrtifiedViaProxies(url).then(function(html) {
-      var data = parseOrtifiedEmbed(html);
-      var authKey = data.authKey || '';
-
-      if (data.seasons.length > 0) {
-        var firstHls = null;
-        for (var s = 0; s < data.seasons.length; s++) {
-          var eps = data.seasons[s].episodes || [];
-          if (eps.length && eps[0].hls) { firstHls = addAuthKey(eps[0].hls, authKey); break; }
-        }
-
-        if (firstHls) {
-          console.log('[iframe-cloud] Trying HLS first, auth key:', authKey);
-          var video = { url: firstHls, title: movieTitle, quality: true, subtitles: [] };
-          Lampa.Player.play(video);
-          Lampa.Player.playlist([video]);
-
-          setTimeout(function() {
-            showSeasonSelector(data.seasons, movieTitle, data.current, authKey, url);
-          }, 500);
-        } else {
-          Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
-          showSeasonSelector(data.seasons, movieTitle, data.current, authKey, url);
-        }
-      } else if (data.hlsUrl) {
-        var finalUrl = addAuthKey(data.hlsUrl, authKey);
-        playHls(finalUrl, movieTitle, url);
-      } else {
-        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено, открываем iframe...');
-        showIframePlayer(url, playerLabel, onFailure);
-      }
-    }).catch(function(e) {
-      console.log('[iframe-cloud] ortified all proxies failed:', e.message, '- trying iframe');
-      Lampa.Noty.show(PLUGIN_NAME + ': прямой iframe ' + playerLabel + '...');
-      showIframePlayer(url, playerLabel, function() {
-        if (onFailure) onFailure();
-      });
-    });
-  }
-
-  /* ---- Auto-try next player ---- */
-
-  function tryNextPlayer(players, currentIndex, movieTitle) {
-    for (var i = currentIndex + 1; i < players.length; i++) {
-      var np = players[i];
-      if (isVeoveo(np)) continue;
-      if (isOrtified(np)) {
-        (function(idx, p) {
-          Lampa.Noty.show(PLUGIN_NAME + ': пробуем ' + p.source + '...');
-          playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', movieTitle, function() {
-            tryNextPlayer(players, idx, movieTitle);
-          });
-        })(i, np);
-        return true;
-      } else {
-        showIframePlayer(np.url, np.source + ' (' + (np.translate || '') + ')');
-        return true;
-      }
-    }
-    Lampa.Noty.show(PLUGIN_NAME + ': все плееры недоступны, откройте iframe.cloud');
-    window.open(IFRAME_CLOUD_BASE + '0', '_blank');
-    return false;
-  }
-
   /* ---- Main flow ---- */
 
   function openPlugin(movie) {
     var id = movie.id;
-    if (!id) { Lampa.Noty.show('Нет ID фильма'); return; }
+    if (!id) { Lampa.Noty.show('\u041d\u0435\u0442 ID \u0444\u0438\u043b\u044c\u043c\u0430'); return; }
     var title = movie.title || movie.name || '';
 
-    Lampa.Noty.show(PLUGIN_NAME + ': поиск...');
+    Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0438\u0441\u043a...');
 
     getKinopoiskId(movie)
       .then(function(kpId) {
         if (!kpId) {
-          Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID не найден');
+          Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
           return;
         }
 
@@ -494,27 +231,27 @@
           players = players.filter(function(p) { return !isVeoveo(p); });
 
           if (!players.length) {
-            Lampa.Noty.show(PLUGIN_NAME + ': плееры не найдены');
+            Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043b\u0435\u0435\u0440\u044b \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b');
             return;
           }
 
           var items = players.map(function(p, i) {
             return {
-              title: p.source + ' — ' + (p.translate || ''),
+              title: p.source + ' \u2014 ' + (p.translate || ''),
               subtitle: p.quality || '',
               _player: p, _index: i
             };
           });
 
           items.push({
-            title: '🌐 Открыть в браузере',
+            title: '\ud83c\udf10 \u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0432 \u0431\u0440\u0430\u0437\u0435\u0440\u0435',
             subtitle: 'iframe.cloud',
             _browser: true,
             _cloudUrl: IFRAME_CLOUD_BASE + kpId
           });
 
           Lampa.Select.show({
-            title: PLUGIN_NAME + ' — ' + title,
+            title: PLUGIN_NAME + ' \u2014 ' + title,
             items: items,
             onSelect: function(item) {
               if (item._browser) {
@@ -523,21 +260,16 @@
               }
 
               var p = item._player;
-
-              if (isOrtified(p)) {
-                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title, function() {
-                  tryNextPlayer(players, item._index, title);
-                });
-              } else {
-                showIframePlayer(p.url, p.source + ' (' + (p.translate || '') + ')');
-              }
+              var label = p.source + ' (' + (p.translate || '') + ')';
+              console.log('[iframe-cloud] Opening:', label, p.url);
+              showIframePlayer(p.url, label);
             }
           });
         });
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
-        Lampa.Noty.show(PLUGIN_NAME + ': ошибка');
+        Lampa.Noty.show(PLUGIN_NAME + ': \u043e\u0448\u0438\u0431\u043a\u0430');
       });
   }
 
@@ -547,7 +279,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.15.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.16.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -576,7 +308,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.15.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.16.0', name: PLUGIN_NAME, description: 'Watch via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
