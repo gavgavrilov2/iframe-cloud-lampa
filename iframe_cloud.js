@@ -5,7 +5,6 @@
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
-  var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
@@ -37,38 +36,6 @@
 
   function fetchJsonViaProxy(url) {
     return fetchJson(proxy(url));
-  }
-
-  /* ---- ortified multi-proxy fetch ---- */
-
-  function fetchOrtifiedHtml(url) {
-    console.log('[iframe-cloud] fetchOrtifiedHtml:', url.substring(0, 80));
-
-    return fetchText(proxy(url)).then(function(html) {
-      if (html && html.indexOf('makePlayer') !== -1) {
-        console.log('[iframe-cloud] ortified via Worker OK');
-        return html;
-      }
-      throw new Error('No makePlayer in Worker response');
-    }).catch(function(e) {
-      console.log('[iframe-cloud] Worker failed for ortified:', e.message, '- trying Vercel');
-      return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url)).then(function(html) {
-        if (html && html.indexOf('makePlayer') !== -1) {
-          console.log('[iframe-cloud] ortified via Vercel OK');
-          return html;
-        }
-        throw new Error('No makePlayer in Vercel response');
-      });
-    }).catch(function(e) {
-      console.log('[iframe-cloud] Vercel failed for ortified:', e.message, '- trying direct');
-      return fetchText(url).then(function(html) {
-        if (html && html.indexOf('makePlayer') !== -1) {
-          console.log('[iframe-cloud] ortified via direct OK');
-          return html;
-        }
-        throw new Error('No makePlayer in direct response');
-      });
-    });
   }
 
   /* ---- Kinopoisk ID ---- */
@@ -404,30 +371,10 @@
 
   /* ---- Process ortified embed ---- */
 
-  function playOrtified(url, playerLabel, movieTitle, onFailure) {
-    Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
-
-    fetchOrtifiedHtml(url).then(function(html) {
-      var data = parseOrtifiedEmbed(html);
-
-      if (data.seasons.length > 0) {
-        Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
-        showSeasonSelector(data.seasons, movieTitle, data.current, data.authKey);
-      } else if (data.hlsUrl) {
-        var hls = applyAuthKey(data.hlsUrl, data.authKey);
-        playHls(hls, movieTitle);
-      } else {
-        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено в ' + playerLabel);
-        if (onFailure) onFailure();
-      }
-    }).catch(function(e) {
-      console.log('[iframe-cloud] ortified fetch error:', e.message);
-      if (onFailure) onFailure();
-      else {
-        Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки, откройте в браузере');
-        window.open(url, '_blank');
-      }
-    });
+  function playOrtified(url, playerLabel, movieTitle) {
+    console.log('[iframe-cloud] Opening ortified in browser:', url);
+    window.open(url, '_blank');
+    Lampa.Noty.show(PLUGIN_NAME + ': откройте в браузере');
   }
 
   /* ---- Auto-try next player ---- */
@@ -437,12 +384,7 @@
       var np = players[i];
       if (isVeoveo(np)) continue;
       if (isOrtified(np)) {
-        (function(idx, p) {
-          Lampa.Noty.show(PLUGIN_NAME + ': пробуем ' + p.source + '...');
-          playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', movieTitle, function() {
-            tryNextPlayer(players, idx, movieTitle);
-          });
-        })(i, np);
+        playOrtified(np.url, np.source + ' (' + (np.translate || '') + ')', movieTitle);
         return true;
       } else {
         Lampa.Noty.show(PLUGIN_NAME + ': откройте ' + np.source + ' в браузере');
@@ -508,9 +450,7 @@
               var p = item._player;
 
               if (isOrtified(p)) {
-                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title, function() {
-                  tryNextPlayer(players, item._index, title);
-                });
+                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title);
               } else {
                 window.open(p.url, '_blank');
                 Lampa.Noty.show(PLUGIN_NAME + ': открыто в браузере');
