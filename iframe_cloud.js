@@ -151,10 +151,15 @@
 
     fetchHtml('https://iframe.cloud/iframe/' + id)
       .then(function(html) {
+        console.log('[iframe-cloud] HTML length:', html.length);
+        console.log('[iframe-cloud] HTML snippet:', html.substring(0, 500));
         var players = extractPlayersFromHtml(html);
+        console.log('[iframe-cloud] Raw players:', players.length);
         players = players.filter(function(p) { return !isVeoveo(p); });
+        console.log('[iframe-cloud] After Veoveo filter:', players.length);
 
         if (!players.length) {
+          console.log('[iframe-cloud] No players found in HTML');
           Lampa.Noty.show(PLUGIN_NAME + ': нет доступных плееров');
           return;
         }
