@@ -201,7 +201,7 @@
   }
 
   function parseOrtifiedEmbed(html) {
-    var result = { seasons: [], hlsUrl: null, authKey: null };
+    var result = { seasons: [], hlsUrl: null };
 
     var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
     if (!mkMatch) return result;
@@ -231,67 +231,21 @@
       console.log('[iframe-cloud] ortified JSON parse error:', e.message);
     }
 
-    var authMatch = html.match(/var\s+c9c8e5255cc62386\s*=\s*["']([^"']+)["']/);
-    if (authMatch) {
-      result.authKey = authMatch[1];
-      console.log('[iframe-cloud] Found auth key:', authMatch[1]);
-    }
-
     return result;
-  }
-
-  function applyAuthKey(url, authKey) {
-    if (!authKey || !url) return url;
-    return url + '&' + authKey;
   }
 
   /* ---- Lampa Player ---- */
 
-  function playHls(url, title, allEpisodes, startIndex) {
-    if (!allEpisodes || allEpisodes.length === 0) {
-      console.log('[iframe-cloud] Playing HLS single:', url.substring(0, 80));
-      Lampa.Player.play({ url: url, title: title || PLUGIN_NAME, quality: true, subtitles: [] });
-      Lampa.Player.run();
-      return;
-    }
-
-    var playlist = [];
-    for (var i = 0; i < allEpisodes.length; i++) {
-      var ep = allEpisodes[i];
-      var sNum = ep.season || 1;
-      var eNum = ep.episode || (i + 1);
-      var hash = Lampa.Utils.hash([sNum, eNum > 10 ? ':' : '', eNum, title].join(''));
-      var subs = [];
-      if (ep.cc && ep.cc.length) {
-        for (var c = 0; c < ep.cc.length; c++) {
-          subs.push({ url: ep.cc[c].url, label: ep.cc[c].name || 'Sub' });
-        }
-      }
-      var epTitle = ep.title || ('S' + sNum + 'E' + (eNum < 10 ? '0' : '') + eNum);
-      var cell = {
-        title: epTitle,
-        url: ep.hls,
-        timeline: Lampa.Timeline.view(hash),
-        season: sNum,
-        episode: eNum,
-        subtitles: subs,
-        voice_name: PLUGIN_NAME
-      };
-      if (i === startIndex) cell.quality = true;
-      playlist.push(cell);
-    }
-
-    var first = playlist[startIndex];
-    console.log('[iframe-cloud] Playing playlist:', playlist.length, 'episodes, starting at', startIndex);
-    Lampa.Player.play(first);
-    Lampa.Player.playlist(playlist);
+  function playHls(url, title) {
+    console.log('[iframe-cloud] Playing HLS:', url.substring(0, 80));
+    Lampa.Player.play({ url: url, title: title || PLUGIN_NAME, quality: true, subtitles: [] });
+    Lampa.Player.run();
   }
 
   /* ---- Episode/Season UI ---- */
 
-  function showEpisodeSelector(seasons, title, current, authKey) {
+  function showEpisodeSelector(seasons, title, current) {
     var items = [];
-    var allEps = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
     for (var s = 0; s < sorted.length; s++) {
@@ -301,28 +255,17 @@
 
       for (var e = 0; e < eps.length; e++) {
         var ep = eps[e];
-        var eNum = parseInt(ep.episode) || (e + 1);
-        var hls = applyAuthKey(ep.hls || '', authKey);
+        var eNum = ep.episode || (e + 1);
+        var hls = ep.hls || '';
         var dur = ep.duration ? Math.round(ep.duration / 60) + ' мин' : '';
-        var voiceCount = ep.audio && ep.audio.names ? ep.audio.names.length : 0;
-        var subCount = ep.cc && ep.cc.length ? ep.cc.length : 0;
         var isCur = current && current.season == sNum && current.episode == eNum;
 
-        var epInfo = [];
-        if (dur) epInfo.push(dur);
-        if (voiceCount) epInfo.push(voiceCount + ' голосов');
-        if (subCount) epInfo.push(subCount + ' субтитр.');
-
         if (hls) {
-          var idx = allEps.length;
-          allEps.push({ season: sNum, episode: eNum, hls: hls, title: ep.title || '', cc: ep.cc || [], duration: ep.duration || 0 });
           items.push({
-            title: (isCur ? '► ' : '') + 'S' + sNum + 'E' + (eNum < 10 ? '0' : '') + eNum + (ep.title ? ' — ' + ep.title : ''),
-            subtitle: epInfo.join(', '),
+            title: (isCur ? '► ' : '') + 'S' + sNum + 'E' + eNum,
+            subtitle: dur,
             _hls: hls,
-            _label: 'S' + sNum + 'E' + eNum,
-            _allEps: allEps,
-            _startIdx: idx
+            _label: 'S' + sNum + 'E' + eNum
           });
         }
       }
@@ -333,11 +276,11 @@
     Lampa.Select.show({
       title: PLUGIN_NAME + ' — ' + title,
       items: items,
-      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title, item._allEps, item._startIdx); }
+      onSelect: function(item) { playHls(item._hls, item._label + ' ' + title); }
     });
   }
 
-  function showSeasonSelector(seasons, title, current, authKey) {
+  function showSeasonSelector(seasons, title, current) {
     var items = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
@@ -356,20 +299,13 @@
       items: items,
       onSelect: function(item) {
         var eps = item._season.episodes || [];
-        var wrappedSeason = [item._season];
-        if (eps.length === 1) {
-          var ep = eps[0];
-          var hls = applyAuthKey(ep.hls || '', authKey);
-          var singleArr = [{ season: item._sNum, episode: 1, hls: hls, title: ep.title || '', cc: ep.cc || [], duration: ep.duration || 0 }];
-          playHls(hls, 'S' + item._sNum + 'E01 ' + title, singleArr, 0);
-        } else {
-          showEpisodeSelector(wrappedSeason, title, current, authKey);
-        }
+        if (eps.length === 1) { playHls(eps[0].hls, 'S' + item._sNum + 'E1 ' + title); }
+        else { showEpisodeSelector([item._season], title, current); }
       }
     });
   }
 
-  /* ---- Process ortified embed ---- */
+  /* ---- iframe player (inline, not new tab) ---- */
 
   function showIframePlayer(url, label) {
     var overlay = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
@@ -400,10 +336,30 @@
     console.log('[iframe-cloud] iframe player opened:', label);
   }
 
-  function playOrtified(url, playerLabel, movieTitle) {
-    console.log('[iframe-cloud] ortified:', url);
-    showIframePlayer(url, playerLabel);
-    Lampa.Noty.show(PLUGIN_NAME + ': ' + playerLabel);
+  /* ---- Process ortified embed ---- */
+
+  function playOrtified(url, playerLabel, movieTitle, onFailure) {
+    Lampa.Noty.show(PLUGIN_NAME + ': загрузка ' + playerLabel + '...');
+
+    fetchText(proxy(url)).then(function(html) {
+      var data = parseOrtifiedEmbed(html);
+
+      if (data.seasons.length > 0) {
+        Lampa.Noty.show(PLUGIN_NAME + ': сериал, ' + data.seasons.length + ' сезон(ов)');
+        showSeasonSelector(data.seasons, movieTitle, data.current);
+      } else if (data.hlsUrl) {
+        playHls(data.hlsUrl, movieTitle);
+      } else {
+        Lampa.Noty.show(PLUGIN_NAME + ': видео не найдено в ' + playerLabel);
+        if (onFailure) onFailure();
+      }
+    }).catch(function(e) {
+      console.log('[iframe-cloud] ortified fetch error:', e.message);
+      if (onFailure) onFailure();
+      else {
+        showIframePlayer(url, playerLabel);
+      }
+    });
   }
 
   /* ---- Auto-try next player ---- */
@@ -413,7 +369,12 @@
       var np = players[i];
       if (isVeoveo(np)) continue;
       if (isOrtified(np)) {
-        playOrtified(np.url, np.source + ' (' + (np.translate || '') + ')', movieTitle);
+        (function(idx, p) {
+          Lampa.Noty.show(PLUGIN_NAME + ': пробуем ' + p.source + '...');
+          playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', movieTitle, function() {
+            tryNextPlayer(players, idx, movieTitle);
+          });
+        })(i, np);
         return true;
       } else {
         showIframePlayer(np.url, np.source + ' (' + (np.translate || '') + ')');
@@ -478,7 +439,9 @@
               var p = item._player;
 
               if (isOrtified(p)) {
-                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title);
+                playOrtified(p.url, p.source + ' (' + (p.translate || '') + ')', title, function() {
+                  tryNextPlayer(players, item._index, title);
+                });
               } else {
                 showIframePlayer(p.url, p.source + ' (' + (p.translate || '') + ')');
               }
