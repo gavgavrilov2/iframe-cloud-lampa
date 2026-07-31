@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v1.4.0');
+  console.log('[iframe-cloud] Loading v1.5.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
 
@@ -38,7 +38,7 @@
       '<div style="' +
         'position:absolute;bottom:20px;left:0;right:0;text-align:center;' +
         'color:rgba(255,255,255,0.5);font-size:14px;z-index:100000;' +
-      '">ESC / Back — закрыть</div>'
+      '">' + title + ' | ESC — закрыть</div>'
     );
 
     var iframe = $('<iframe></iframe>', {
@@ -47,8 +47,61 @@
       allow: 'autoplay; fullscreen'
     });
 
+    var videoUrl = null;
+
+    function tryExtractVideo() {
+      try {
+        var doc = iframe[0].contentDocument || iframe[0].contentWindow.document;
+        var video = doc.querySelector('video');
+        if (video && video.src) {
+          videoUrl = video.src;
+          console.log('[iframe-cloud] Video URL found:', videoUrl);
+          return true;
+        }
+        var sources = doc.querySelectorAll('source');
+        for (var i = 0; i < sources.length; i++) {
+          if (sources[i].src) {
+            videoUrl = sources[i].src;
+            console.log('[iframe-cloud] Source URL found:', videoUrl);
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    }
+
     iframe.on('load', function() {
       loading.remove();
+      setTimeout(function() {
+        if (!videoUrl && tryExtractVideo()) {
+          playNative(videoUrl, title);
+          overlay.remove();
+          $(document).off('keydown.iframecloud');
+        }
+      }, 2000);
+      setTimeout(function() {
+        if (!videoUrl && tryExtractVideo()) {
+          playNative(videoUrl, title);
+          overlay.remove();
+          $(document).off('keydown.iframecloud');
+        }
+      }, 5000);
+    });
+
+    window.addEventListener('message', function handler(e) {
+      if (e.data && typeof e.data === 'string') {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.url && (data.url.indexOf('.mp4') > -1 || data.url.indexOf('.m3u8') > -1 || data.url.indexOf('video') > -1)) {
+            console.log('[iframe-cloud] postMessage video:', data.url);
+            videoUrl = data.url;
+            playNative(videoUrl, title);
+            overlay.remove();
+            $(document).off('keydown.iframecloud');
+            window.removeEventListener('message', handler);
+          }
+        } catch (err) {}
+      }
     });
 
     function closeOverlay() {
@@ -72,9 +125,29 @@
     overlay.append(loading).append(iframe).append(closeBtn).append(hint);
     $('body').append(overlay);
 
-    setTimeout(function() {
-      closeBtn.focus();
-    }, 500);
+    setTimeout(function() { closeBtn.focus(); }, 500);
+  }
+
+  function playNative(url, title) {
+    console.log('[iframe-cloud] Playing natively:', url);
+    var play = {
+      title: title || PLUGIN_NAME,
+      url: url,
+      quality: {},
+      callback: function() {}
+    };
+
+    if (url.indexOf('.m3u8') > -1) {
+      play.url = url;
+    } else if (url.indexOf('.mp4') > -1) {
+      var base = url.replace(/_\d+\.mp4.*$/, '_');
+      var qualities = [2160, 1080, 720, 480, 360];
+      qualities.forEach(function(q) {
+        play.quality[q + 'p'] = base + q + '.mp4';
+      });
+    }
+
+    Lampa.Player.play(play);
   }
 
   function tryFetchWithTimeout(url, callback) {
@@ -161,7 +234,7 @@
     if (render.find('.iframe-cloud-btn').length) return;
 
     var btn = $(
-      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v1.4.0">' +
+      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v1.5.0">' +
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
           '<polygon points="5 3 19 12 5 21 5 3"/>' +
         '</svg>' +
@@ -218,7 +291,7 @@
 
     Lampa.Manifest.plugins = {
       type: 'video',
-      version: '1.4.0',
+      version: '1.5.0',
       name: PLUGIN_NAME,
       description: 'Фильмы через iframe.cloud',
       component: 'iframe_cloud',
