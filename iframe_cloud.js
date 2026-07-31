@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.10.0');
+  console.log('[iframe-cloud] Loading v5.11.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -308,7 +308,7 @@
 
   /* ---- iframe player (inline, not new tab) ---- */
 
-  function showIframePlayer(url, label) {
+  function showIframePlayer(url, label, onClose) {
     var overlay = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
     var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">✕ Закрыть</div>');
     var iframe = $('<iframe src="' + url + '" style="width:100%;height:100%;border:none;" allowfullscreen="true" allow="autoplay; fullscreen"></iframe>');
@@ -320,6 +320,7 @@
       overlay.remove();
       document.removeEventListener('keydown', keyHandler);
       console.log('[iframe-cloud] iframe player closed');
+      if (onClose) onClose();
     }
 
     closeBtn.on('hover:enter click', close);
@@ -366,12 +367,11 @@
         if (onFailure) onFailure();
       }
     }).catch(function(e) {
-      console.log('[iframe-cloud] ortified all proxies failed:', e.message);
-      if (onFailure) onFailure();
-      else {
-        window.open(url, '_blank');
-        Lampa.Noty.show(PLUGIN_NAME + ': откройте в браузере');
-      }
+      console.log('[iframe-cloud] ortified all proxies failed:', e.message, '- trying iframe');
+      Lampa.Noty.show(PLUGIN_NAME + ': прямой iframe ' + playerLabel + '...');
+      showIframePlayer(url, playerLabel, function() {
+        if (onFailure) onFailure();
+      });
     });
   }
 
@@ -474,7 +474,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.10.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.11.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -503,7 +503,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.10.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
+      type: 'video', version: '5.11.0', name: PLUGIN_NAME, description: 'Native HLS via iframe.cloud API', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
