@@ -45,7 +45,7 @@ export default {
 };
 
 async function getIframePage(tmdbId) {
-  const resp = await fetch('https://iframe.cloud/iframe/' + tmdbId, {
+  return await fetch('https://iframe.cloud/iframe/' + tmdbId, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -53,17 +53,14 @@ async function getIframePage(tmdbId) {
       'Referer': 'https://iframe.cloud/'
     }
   });
-  return resp;
 }
 
 async function getPlayers(tmdbId) {
   const iframeResp = await getIframePage(tmdbId);
-
   if (!iframeResp.ok) throw new Error('iframe.cloud returned ' + iframeResp.status);
 
   const html = await iframeResp.text();
   let players = extractPlayers(html);
-
   players = players.filter(function(p) { return !isVeoveo(p); });
 
   const cookies = getSetCookies(iframeResp);
@@ -121,17 +118,25 @@ async function handleDebug(tmdbId, corsHeaders) {
     const html = await iframeResp.text();
     const players = extractPlayers(html);
     const filtered = players.filter(function(p) { return !isVeoveo(p); });
-
-    const results = [];
     const cookies = getSetCookies(iframeResp);
+
+    const results = {
+      iframe_cloud_status: iframeResp.status,
+      iframe_cloud_html_length: html.length,
+      iframe_cloud_html_snippet: html.substring(0, 5000),
+      raw_player_count: players.length,
+      filtered_count: filtered.length,
+      players: []
+    };
 
     for (let i = 0; i < filtered.length; i++) {
       const p = filtered[i];
       const debug = { title: p.title, url: p.url, status: null, html_snippet: null, video_url: null };
 
       try {
-        if (p.url.startsWith('//')) p.url = 'https:' + p.url;
-        const resp = await fetch(p.url, {
+        let embedUrl = p.url;
+        if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
+        const resp = await fetch(embedUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -142,18 +147,20 @@ async function handleDebug(tmdbId, corsHeaders) {
           redirect: 'follow'
         });
         debug.status = resp.status;
+        debug.finalUrl = resp.url;
         const embedHtml = await resp.text();
         debug.html_snippet = embedHtml.substring(0, 3000);
 
         const result = extractVideoFromHtml(embedHtml);
         if (result) {
           debug.video_url = result.url;
+          debug.video_type = result.type;
         }
       } catch (e) {
         debug.error = e.message;
       }
 
-      results.push(debug);
+      results.players.push(debug);
     }
 
     return new Response(JSON.stringify(results, null, 2), {
@@ -248,35 +255,77 @@ function decodeHtml(text) {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'");
+    .replace(/&#x27;/g, "'")
+    .replace(/&#\d+;/g, function(m) {
+      try { return String.fromCharCode(parseInt(m.substring(2, m.length - 1))); } catch(e) { return m; }
+    });
 }
 
 function fixUrl(url) {
-  url = decodeHtml(url);
+  url = decodeHtml(url).trim();
   if (url.indexOf('http://') === 0) url = 'https://' + url.substring(7);
   return url;
 }
 
 function extractPlayers(html) {
   var players = [];
+  var seen = {};
   var match;
 
-  var regex1 = /class="cinemaplayer-item-select"[^>]*data-value="([^"]+)"[^>]*>([^<]*)/g;
-  while ((match = regex1.exec(html)) !== null) {
-    players.push({ url: fixUrl(match[1]), title: decodeHtml(match[2].trim()) });
+  var patterns = [
+    /class="cinemaplayer-item-select"[^>]*data-value="([^"]+)"[^>]*>([^<]*)/g,
+    /data-value="([^"]+)"[^>]*class="cinemaplayer-item-select"[^>]*>([^<]*)/g,
+    /class="cinemaplayer-item-select"[^>]*>([^<]*)[^>]*data-value="([^"]+)"/g,
+    /data-value="(https?:\/\/[^"]+)"[^>]*class="cinemaplayer-item-select"/g,
+    /data-value="(https?:\/\/[^"]+)"[^>]*>/g,
+    /class="cinemaplayer[^"]*"[^>]*data-value="(https?:\/\/[^"]+)"/g,
+    /data-value="(https?:\/\/[^"]+)"\s*class/g,
+    /class="[^"]*select[^"]*"[^>]*data-value="(https?:\/\/[^"]+)"/g
+  ];
+
+  for (var p = 0; p < patterns.length; p++) {
+    var regex = new RegExp(patterns[p].source, patterns[p].flags);
+    while ((match = regex.exec(html)) !== null) {
+      var url, title;
+      if (match[0].indexOf(match[1]) < match[0].indexOf(match[2] || '')) {
+        url = match[1];
+        title = match[2] || '';
+      } else {
+        url = match[2] || match[1];
+        title = match[1] !== url ? match[1] : '';
+      }
+
+      if (url && url.indexOf('http') === 0 && !seen[url]) {
+        seen[url] = true;
+        players.push({ url: fixUrl(url), title: decodeHtml(title).trim() });
+      }
+    }
+    if (players.length) break;
   }
 
   if (!players.length) {
-    var regex2 = /data-value="([^"]+)"[^>]*class="cinemaplayer-item-select"/g;
-    while ((match = regex2.exec(html)) !== null) {
-      players.push({ url: fixUrl(match[1]), title: '' });
+    var allUrls = html.match(/data-value="(https?:\/\/[^"]+)"/g);
+    if (allUrls) {
+      for (var i = 0; i < allUrls.length; i++) {
+        var m = allUrls[i].match(/data-value="(https?:\/\/[^"]+)"/);
+        if (m && m[1] && !seen[m[1]]) {
+          seen[m[1]] = true;
+          players.push({ url: fixUrl(m[1]), title: '' });
+        }
+      }
     }
   }
 
   if (!players.length) {
-    var regex3 = /data-value="(https?:\/\/[^"]+)"/g;
-    while ((match = regex3.exec(html)) !== null) {
-      players.push({ url: fixUrl(match[1]), title: '' });
+    var hrefs = html.match(/href="(https?:\/\/[^"]*(?:player|embed|video|stream)[^"]*)"/gi);
+    if (hrefs) {
+      for (var j = 0; j < hrefs.length; j++) {
+        var hm = hrefs[j].match(/href="([^"]+)"/);
+        if (hm && hm[1] && !seen[hm[1]]) {
+          seen[hm[1]] = true;
+          players.push({ url: fixUrl(hm[1]), title: '' });
+        }
+      }
     }
   }
 
