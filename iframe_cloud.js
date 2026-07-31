@@ -1,27 +1,14 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v2.0.0');
+  console.log('[iframe-cloud] Loading v2.1.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
 
   var WORKER_URL = Lampa.Storage.get('iframe_cloud_worker', '');
 
-  function playNative(url, title, quality) {
-    console.log('[iframe-cloud] Playing natively:', url);
-
-    var play = {
-      title: title || PLUGIN_NAME,
-      url: url,
-      quality: quality || {},
-      callback: function() {}
-    };
-
-    Lampa.Player.play(play);
-  }
-
   function openIframe(url, title) {
-    console.log('[iframe-cloud] Fallback overlay:', url);
+    console.log('[iframe-cloud] Opening overlay:', url);
     $('.iframe-cloud-overlay').remove();
 
     var overlay = $('<div class="iframe-cloud-overlay"></div>');
@@ -88,7 +75,7 @@
     setTimeout(function() { closeBtn.focus(); }, 500);
   }
 
-  function fetchFromWorker(tmdbId, title, callback) {
+  function fetchPlayers(tmdbId, callback) {
     if (!WORKER_URL) {
       callback(null);
       return;
@@ -106,15 +93,7 @@
         console.log('[iframe-cloud] Worker response:', data);
 
         if (data.players && data.players.length) {
-          var valid = data.players.filter(function(p) { return p.url; });
-
-          if (valid.length === 1) {
-            callback({ type: 'direct', player: valid[0] });
-          } else if (valid.length > 1) {
-            callback({ type: 'select', players: valid });
-          } else {
-            callback(null);
-          }
+          callback(data.players);
         } else {
           callback(null);
         }
@@ -125,44 +104,21 @@
       });
   }
 
-  function tryFetchProxy(url, callback) {
-    var proxies = [
-      'https://api.allorigins.win/raw?url=',
-      'https://corsproxy.io/?url='
-    ];
-
-    function tryProxy(i) {
-      if (i >= proxies.length) {
-        callback(null);
-        return;
-      }
-      var proxyUrl = proxies[i] + encodeURIComponent(url);
-      window.fetch(proxyUrl, { signal: AbortSignal.timeout(5000) })
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.text();
-        })
-        .then(function(html) { callback(html); })
-        .catch(function() { tryProxy(i + 1); });
+  function showPlayers(players, title) {
+    if (players.length === 1) {
+      openIframe(players[0].url, players[0].title || title);
+      return;
     }
 
-    tryProxy(0);
-  }
-
-  function parsePlayers(html) {
-    var players = [];
-    try {
-      var doc = new DOMParser().parseFromString(html, 'text/html');
-      var items = doc.querySelectorAll('.cinemaplayer-item-select');
-      for (var i = 0; i < items.length; i++) {
-        var dataUrl = items[i].getAttribute('data-value');
-        var name = items[i].textContent.trim();
-        if (dataUrl) {
-          players.push({ title: name || ('Плеер ' + (i + 1)), url: dataUrl });
-        }
+    Lampa.Select.show({
+      title: PLUGIN_NAME + ' — ' + title,
+      items: players.map(function(p) {
+        return { title: p.title || 'Плеер', subtitle: title, url: p.url };
+      }),
+      onSelect: function(item) {
+        openIframe(item.url, item.title || title);
       }
-    } catch (e) {}
-    return players;
+    });
   }
 
   function openPlugin(movie) {
@@ -176,78 +132,12 @@
     var directUrl = 'https://iframe.cloud/iframe/' + id;
     console.log('[iframe-cloud] TMDB:', id);
 
-    Lampa.Noty.show('Загрузка ' + PLUGIN_NAME + '...');
-
-    fetchFromWorker(id, title, function(result) {
-      if (!result) {
-        console.log('[iframe-cloud] Worker failed, trying proxy');
-
-        tryFetchProxy(directUrl, function(html) {
-          if (!html) {
-            console.log('[iframe-cloud] All failed, overlay');
-            openIframe(directUrl, title);
-            return;
-          }
-
-          var players = parsePlayers(html);
-          if (!players.length) {
-            openIframe(directUrl, title);
-            return;
-          }
-
-          if (players.length === 1) {
-            openIframe(players[0].url, title);
-            return;
-          }
-
-          Lampa.Select.show({
-            title: PLUGIN_NAME + ' — ' + title,
-            items: players.map(function(p) {
-              return { title: p.title, subtitle: title, url: p.url };
-            }),
-            onSelect: function(item) {
-              openIframe(item.url, item.title);
-            }
-          });
-        });
-        return;
-      }
-
-      if (result.type === 'direct') {
-        var p = result.player;
-        var quality = {};
-        if (p.quality) {
-          quality = p.quality;
-        } else if (p.url.indexOf('.m3u8') > -1) {
-          quality = { 'Auto': p.url };
-        } else if (p.url.indexOf('.mp4') > -1) {
-          [2160, 1080, 720, 480, 360].forEach(function(q) {
-            quality[q + 'p'] = p.url;
-          });
-        }
-
-        playNative(p.url, p.title || title, quality);
-      }
-
-      if (result.type === 'select') {
-        Lampa.Select.show({
-          title: PLUGIN_NAME + ' — ' + title,
-          items: result.players.map(function(p) {
-            return {
-              title: p.title || 'Плеер',
-              subtitle: p.type || '',
-              _player: p
-            };
-          }),
-          onSelect: function(item) {
-            var p = item._player;
-            var quality = {};
-            if (p.quality) {
-              quality = p.quality;
-            }
-            playNative(p.url, p.title || title, quality);
-          }
-        });
+    fetchPlayers(id, function(players) {
+      if (players) {
+        showPlayers(players, title);
+      } else {
+        console.log('[iframe-cloud] Worker unavailable, opening directly');
+        openIframe(directUrl, title);
       }
     });
   }
@@ -257,7 +147,7 @@
     if (render.find('.iframe-cloud-btn').length) return;
 
     var btn = $(
-      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.0.0">' +
+      '<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v2.1.0">' +
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
           '<polygon points="5 3 19 12 5 21 5 3"/>' +
         '</svg>' +
@@ -314,7 +204,7 @@
 
     Lampa.Manifest.plugins = {
       type: 'video',
-      version: '2.0.0',
+      version: '2.1.0',
       name: PLUGIN_NAME,
       description: 'Фильмы через iframe.cloud',
       component: 'iframe_cloud',
