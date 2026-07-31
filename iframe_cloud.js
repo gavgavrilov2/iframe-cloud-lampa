@@ -47,8 +47,14 @@
     var query = tmdbId ? 'externalId.tmdb=' + tmdbId : imdbId ? 'externalId.imdb=' + imdbId : null;
     if (!query) return Promise.resolve(null);
 
-    return fetchJsonViaWorker(KP_API_BASE + '?' + query + '&selectFields=id')
-      .then(function(d) { return d.docs && d.docs[0] && d.docs[0].id || null; })
+    return fetchJsonViaWorker(KP_API_BASE + '?' + query + '&selectFields=id,name')
+      .then(function(d) {
+        if (!d.docs || !d.docs.length) return null;
+        // Pick result with a name (skip invalid empty entries)
+        var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
+        console.log('[iframe-cloud] KP candidates:', d.docs.map(function(m) { return m.id + (m.name ? '(' + m.name + ')' : ''); }).join(', '));
+        return best && best.id || null;
+      })
       .catch(function() { return null; });
   }
 
