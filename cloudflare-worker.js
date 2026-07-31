@@ -12,9 +12,14 @@ export default {
     }
 
     const url = new URL(request.url);
+    const kpuUrl = url.searchParams.get('kpu');
     const proxyUrl = url.searchParams.get('proxy');
     const apiKey = url.searchParams.get('apikey');
     const apiUrl = url.searchParams.get('api');
+
+    if (kpuUrl) {
+      return await handleKpuProxy(kpuUrl, corsHeaders);
+    }
 
     if (apiUrl) {
       return await handleApiProxy(apiUrl, apiKey, corsHeaders);
@@ -24,11 +29,32 @@ export default {
       return await handleProxy(proxyUrl, corsHeaders);
     }
 
-    return new Response(JSON.stringify({ error: 'Usage: ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
+    return new Response(JSON.stringify({ error: 'Usage: ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
       status: 400, headers: corsHeaders
     });
   }
 };
+
+const KPU_TOKEN = '7edcf64b-b9aa-4f8b-8b5c-ef59bfe69a2c';
+
+async function handleKpuProxy(targetUrl, corsHeaders) {
+  try {
+    var resp = await fetch(targetUrl, {
+      headers: {
+        'X-API-KEY': KPU_TOKEN,
+        'Accept': 'application/json'
+      },
+      redirect: 'follow'
+    });
+    var data = await resp.text();
+    return new Response(data, {
+      status: resp.status,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
 
 async function handleApiProxy(targetUrl, apiKey, corsHeaders) {
   try {
