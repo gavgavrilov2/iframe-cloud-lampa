@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.18.2.1');
+  console.log('[iframe-cloud] Loading v5.19.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -182,7 +182,7 @@
 
   /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
 
-  function playHlsProxied(hlsUrl, title) {
+  function playHlsProxied(hlsUrl, title, movie) {
     var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
     console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
     var video = {
@@ -190,6 +190,9 @@
       title: title || PLUGIN_NAME,
       subtitles: []
     };
+    if (movie && movie.id) {
+      video.timeline = { id: movie.id };
+    }
     Lampa.Player.play(video);
     Lampa.Player.playlist([video]);
   }
@@ -275,7 +278,7 @@
 
   /* ---- Episode/Season UI with proxied HLS ---- */
 
-  function showEpisodeSelector(seasons, title, current) {
+  function showEpisodeSelector(seasons, title, current, movie) {
     var items = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
@@ -307,11 +310,11 @@
     Lampa.Select.show({
       title: PLUGIN_NAME + ' \u2014 ' + title,
       items: items,
-      onSelect: function(item) { playHlsProxied(item._hls, item._label + ' ' + title); }
+      onSelect: function(item) { playHlsProxied(item._hls, item._label + ' ' + title, movie); }
     });
   }
 
-  function showSeasonSelector(seasons, title, current) {
+  function showSeasonSelector(seasons, title, current, movie) {
     var items = [];
     var sorted = seasons.slice().sort(function(a, b) { return (a.season || 0) - (b.season || 0); });
 
@@ -331,9 +334,9 @@
       onSelect: function(item) {
         var eps = item._season.episodes || [];
         if (eps.length === 1 && eps[0].hls) {
-          playHlsProxied(eps[0].hls, 'S' + item._sNum + 'E1 ' + title);
+          playHlsProxied(eps[0].hls, 'S' + item._sNum + 'E1 ' + title, movie);
         } else {
-          showEpisodeSelector([item._season], title, current);
+          showEpisodeSelector([item._season], title, current, movie);
         }
       }
     });
@@ -383,7 +386,7 @@
       });
   }
 
-  function playOrtified(url, playerLabel, movieTitle, onFailure) {
+  function playOrtified(url, playerLabel, movieTitle, onFailure, movie) {
     Lampa.Noty.show(PLUGIN_NAME + ': \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 ' + playerLabel + '...');
 
     fetchOrtifiedViaProxies(url).then(function(html) {
@@ -391,9 +394,9 @@
 
       if (data.seasons.length > 0) {
         Lampa.Noty.show(PLUGIN_NAME + ': \u0441\u0435\u0440\u0438\u0430\u043b, ' + data.seasons.length + ' \u0441\u0435\u0437\u043e\u043d(\u043e\u0432)');
-        showSeasonSelector(data.seasons, movieTitle, data.current);
+        showSeasonSelector(data.seasons, movieTitle, data.current, movie);
       } else if (data.hlsUrl) {
-        playHlsProxied(data.hlsUrl, movieTitle);
+        playHlsProxied(data.hlsUrl, movieTitle, movie);
       } else {
         Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c iframe...');
         showIframePlayer(url, playerLabel, onFailure);
@@ -467,7 +470,7 @@
     }
   }
 
-  function playIframeCloud(cloudUrl, movieTitle) {
+  function playIframeCloud(cloudUrl, movieTitle, movie) {
     Lampa.Loading.start('Iframe Cloud');
 
     var kpMatch = cloudUrl.match(/\/iframe\/(\d+)/);
@@ -501,9 +504,9 @@
         if (results.length === 1) {
           var r = results[0];
           if (r.hls) {
-            playHlsProxied(r.hls, movieTitle);
+            playHlsProxied(r.hls, movieTitle, movie);
           } else if (r.seasons && r.seasons.length) {
-            showSeasonSelector(r.seasons, movieTitle, r.current);
+            showSeasonSelector(r.seasons, movieTitle, r.current, movie);
           } else {
             showIframePlayer(players[0].url, movieTitle);
           }
@@ -524,9 +527,9 @@
           onSelect: function(item) {
             var r = item._result;
             if (r.hls) {
-              playHlsProxied(r.hls, movieTitle);
+              playHlsProxied(r.hls, movieTitle, movie);
             } else if (r.seasons && r.seasons.length) {
-              showSeasonSelector(r.seasons, movieTitle, r.current);
+              showSeasonSelector(r.seasons, movieTitle, r.current, movie);
             } else {
               showIframePlayer(r.url, movieTitle);
             }
@@ -678,7 +681,7 @@
             items: items,
             onSelect: function(item) {
               if (item._browser) {
-                playIframeCloud(item._cloudUrl, title);
+                playIframeCloud(item._cloudUrl, title, movie);
                 return;
               }
 
@@ -690,7 +693,7 @@
               if (isOrt) {
                 playOrtified(p.url, pLabel, title, function() {
                   tryNextPlayer(players, item._index, title);
-                });
+                }, movie);
               } else {
                 showIframePlayer(p.url, pLabel);
               }
@@ -710,7 +713,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.18.2.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.19.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -739,7 +742,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.18.2.1', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.19.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
