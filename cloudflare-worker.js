@@ -32,7 +32,7 @@ export default {
     }
 
     if (proxyUrl) {
-      return await handleProxy(proxyUrl, corsHeaders);
+      return await handleProxy(proxyUrl, corsHeaders, request);
     }
 
     return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY&year=YEAR or ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
@@ -77,34 +77,45 @@ async function handleApiProxy(targetUrl, apiKey, corsHeaders) {
   }
 }
 
-async function handleProxy(targetUrl, corsHeaders) {
+async function handleProxy(targetUrl, corsHeaders, request) {
   try {
     if (targetUrl.startsWith('//')) targetUrl = 'https:' + targetUrl;
     var target = new URL(targetUrl);
     var referer = target.origin + '/';
     var reqHeaders = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept': '*/*',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
         'Referer': referer,
+        'Origin': target.origin,
         'Sec-Ch-Ua': '"Google Chrome";v="136", "Chromium";v="136"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'video',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
         'Cache-Control': 'max-age=0'
     };
+    if (request && request.headers) {
+      var range = request.headers.get('Range');
+      if (range) reqHeaders['Range'] = range;
+    }
     if (targetUrl.indexOf('api.kinopoisk.dev') !== -1) {
       reqHeaders['Accept'] = 'application/json';
+      reqHeaders['Sec-Fetch-Dest'] = 'document';
+      reqHeaders['Sec-Fetch-Mode'] = 'navigate';
     }
     var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
-    var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
+    var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
     var ct = resp.headers.get('Content-Type');
-    headers['Content-Type'] = ct || 'text/html; charset=utf-8';
+    headers['Content-Type'] = ct || 'video/mp4';
+    var cl = resp.headers.get('Content-Length');
+    if (cl) headers['Content-Length'] = cl;
+    var cr = resp.headers.get('Content-Range');
+    if (cr) headers['Content-Range'] = cr;
+    var ar = resp.headers.get('Accept-Ranges');
+    if (ar) headers['Accept-Ranges'] = ar;
     return new Response(resp.body, { status: resp.status, headers: headers });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });

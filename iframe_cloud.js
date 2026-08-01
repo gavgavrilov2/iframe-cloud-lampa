@@ -472,7 +472,7 @@
       Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + best.quality + ', ' + titleTime + ')');
 
       var play = {
-        url: best.url,
+        url: proxy(best.url),
         title: best.title + ' [' + best.quality + ']',
         subtitles: []
       };
@@ -483,7 +483,7 @@
           return parseInt(b) - parseInt(a);
         });
         for (var i = 0; i < qKeys.length; i++) {
-          play.quality[qKeys[i]] = best.qualities[qKeys[i]];
+          play.quality[qKeys[i]] = proxy(best.qualities[qKeys[i]]);
         }
       }
 
