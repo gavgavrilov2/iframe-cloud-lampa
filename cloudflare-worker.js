@@ -272,7 +272,13 @@ async function handleVkSearch(query, year, corsHeaders) {
       });
     }
 
-    videos.sort(function(a, b) { return b.duration - a.duration; });
+    videos.sort(function(a, b) {
+      if (b.quality !== a.quality) {
+        var qOrder = { '2160p': 6, '1440p': 5, '1080p': 4, '720p': 3, '480p': 2, '360p': 1, '240p': 0 };
+        return (qOrder[b.quality] || 0) - (qOrder[a.quality] || 0);
+      }
+      return b.duration - a.duration;
+    });
 
     return new Response(JSON.stringify({ videos: videos }), {
       status: 200, headers: corsHeaders
