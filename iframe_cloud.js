@@ -151,8 +151,9 @@
 
   /* ---- iframe.cloud players API ---- */
 
-  function getPlayers(kpId) {
-    var url = IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId;
+  function getPlayers(kpId, tmdbId) {
+    var url = IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId + '&type=movie';
+    if (tmdbId) url += '&id=' + tmdbId;
     console.log('[iframe-cloud] Fetching players:', url);
     return fetchJsonViaProxy(url)
       .then(function(data) {
@@ -162,14 +163,14 @@
       });
   }
 
-  function getPlayersWithRetry(kpId, attempt) {
+  function getPlayersWithRetry(kpId, tmdbId, attempt) {
     attempt = attempt || 0;
-    return getPlayers(kpId).then(function(players) {
+    return getPlayers(kpId, tmdbId).then(function(players) {
       if (players.length === 0 && attempt < 3) {
         console.log('[iframe-cloud] Retry in 1.5s, attempt', attempt + 1);
         return new Promise(function(resolve) {
           setTimeout(function() {
-            resolve(getPlayersWithRetry(kpId, attempt + 1));
+            resolve(getPlayersWithRetry(kpId, tmdbId, attempt + 1));
           }, 1500);
         });
       }
@@ -484,12 +485,13 @@
         console.log('[iframe-cloud] FanFilm page:', pageData.title, pageData.quality, pageData.iframeUrl);
 
         if (pageData.iframeUrl) {
+          var proxiedUrl = WORKER_URL + '/?stravers=' + encodeURIComponent(pageData.iframeUrl);
           Lampa.Noty.show(PLUGIN_NAME + ': ' + (pageData.title || title) + ' (' + (pageData.quality || '?') + ')');
 
           addToHistory(movie);
 
           var play = {
-            url: pageData.iframeUrl,
+            url: proxiedUrl,
             title: PLUGIN_NAME + ' FanFilm ' + (pageData.quality || '') + ' — ' + (pageData.title || title),
             subtitles: []
           };
@@ -508,7 +510,7 @@
             label: 'FanFilm'
           };
 
-          showIframePlayer(pageData.iframeUrl, 'FanFilm ' + (pageData.quality || ''), function() {});
+          showIframePlayer(proxiedUrl, 'FanFilm ' + (pageData.quality || ''), function() {});
         } else {
           Lampa.Noty.show(PLUGIN_NAME + ': iframe не найден');
         }
@@ -779,7 +781,7 @@
 
     var kpId = kpMatch[1];
 
-    fetchJsonViaProxy(IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId).then(function(data) {
+    fetchJsonViaProxy(IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId + '&type=movie' + (movie && movie.id ? '&id=' + movie.id : '')).then(function(data) {
       var players = (data.players || []).filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
       if (!players.length) {
@@ -976,7 +978,7 @@
 
         console.log('[iframe-cloud] KP ID:', kpId);
 
-        return getPlayersWithRetry(kpId).then(function(players) {
+        return getPlayersWithRetry(kpId, id).then(function(players) {
           players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
           if (!players.length) {
