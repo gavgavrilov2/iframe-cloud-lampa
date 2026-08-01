@@ -322,33 +322,43 @@ async function handleVkStream(targetUrl, corsHeaders, request) {
 
 async function handleVkStreamProxy(ownerId, videoId, quality, corsHeaders, request) {
   try {
-    var token = await getVkToken();
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'VK token failed' }), { status: 500, headers: corsHeaders });
-    }
+    var embedUrl = 'https://vk.com/video_ext.php?oid=' + ownerId + '&id=' + videoId;
 
-    var body = 'owner_id=' + ownerId +
-      '&videos=' + videoId +
-      '&access_token=' + token +
-      '&v=5.264';
-
-    var apiResp = await fetch('https://api.vkvideo.ru/method/video.get', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
+    var embedResp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://vk.com/'
+      }
     });
 
-    var json = await apiResp.json();
-    var items = (json.response && json.response.items) || [];
-    var video = items[0];
+    var html = await embedResp.text();
 
-    if (!video || !video.files) {
-      return new Response(JSON.stringify({ error: 'No video files', video_id: videoId }), { status: 404, headers: corsHeaders });
+    var qualNum = parseInt(quality.replace('mp4_', '')) || 720;
+
+    var mp4Url = null;
+
+    var qualityPriority = ['mp4_' + qualNum, 'mp4_720', 'mp4_480', 'mp4_360'];
+    for (var i = 0; i < qualityPriority.length; i++) {
+      var q = qualityPriority[i];
+      var re = new RegExp('"' + q + '"\\s*:\\s*"(https?:\\\\/\\\\/[^"]+)"');
+      var m = html.match(re);
+      if (m && m[1]) {
+        mp4Url = m[1].replace(/\\\//g, '/');
+        break;
+      }
     }
 
-    var mp4Url = video.files[quality] || video.files.mp4_720 || video.files.mp4_480 || video.files.mp4_360;
     if (!mp4Url) {
-      return new Response(JSON.stringify({ error: 'Quality not found', available: Object.keys(video.files) }), { status: 404, headers: corsHeaders });
+      var allMp4 = html.match(/https?:\/\/vkvd\d+\.okcdn\.ru\/\?[^\s"'<>]+/g);
+      if (allMp4 && allMp4.length) {
+        mp4Url = allMp4[0].replace(/\\\//g, '/');
+      }
+    }
+
+    if (!mp4Url) {
+      return new Response(JSON.stringify({ error: 'No mp4 URL in embed page', owner_id: ownerId, video_id: videoId, html_len: html.length }), { status: 404, headers: corsHeaders });
     }
 
     var target = new URL(mp4Url);
@@ -356,8 +366,8 @@ async function handleVkStreamProxy(ownerId, videoId, quality, corsHeaders, reque
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
       'Accept': '*/*',
       'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Referer': target.origin + '/',
-      'Origin': target.origin
+      'Referer': 'https://vk.com/',
+      'Origin': 'https://vk.com'
     };
     if (request && request.headers) {
       var range = request.headers.get('Range');
