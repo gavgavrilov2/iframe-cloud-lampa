@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.23.3');
+  console.log('[iframe-cloud] Loading v5.25.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -469,74 +469,81 @@
         titleTime = h > 0 ? h + 'ч ' + m + 'мин' : m + ' мин';
       }
 
-      Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + best.quality + ', ' + titleTime + ')');
+      var infoUrl = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id;
 
-      var play = {
-        url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&qual=mp4_1080',
-        title: best.title + ' [' + best.quality + ']',
-        subtitles: []
-      };
+      fetchJson(infoUrl).then(function(info) {
+        var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
+        var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
 
-      if (best.qualities && Object.keys(best.qualities).length > 1) {
-        play.quality = {};
-        var qualityNames = { 2160: 'mp4_2160', 1440: 'mp4_1440', 1080: 'mp4_1080', 720: 'mp4_720', 480: 'mp4_480', 360: 'mp4_360' };
-        var qKeys = Object.keys(best.qualities).sort(function(a, b) {
-          return parseInt(b) - parseInt(a);
-        });
-        for (var i = 0; i < qKeys.length; i++) {
-          var qNum = parseInt(qKeys[i]);
-          var vkQual = qualityNames[qNum] || 'mp4_' + qNum;
-          play.quality[qKeys[i]] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&qual=' + vkQual + '&q=' + encodeURIComponent(title) + '&year=' + (year || '');
-        }
-      }
+        console.log('[iframe-cloud] VK embed qualities:', mp4Qualities.join(', '), 'best:', bestQuality + 'p');
 
-      var hash = getTimelineHash(movie, 'VK');
-      var timeline = Lampa.Timeline.view(hash);
-      play.timeline = timeline;
+        Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
-      var beholdHash = getBeholdHash(movie, 'VK');
-      markViewed(beholdHash);
-
-      window._iframe_cloud_current = {
-        timeline: timeline,
-        beholdHash: beholdHash,
-        movie: movie,
-        label: 'VK'
-      };
-
-      Lampa.Player.play(play);
-      Lampa.Player.playlist([play]);
-
-      setTimeout(function() {
-        var el = document.querySelector('video');
-        if (!el) return;
-
-        var lastSave = 0;
-        var savePos = function() {
-          var now = Date.now();
-          if (now - lastSave < 3000) return;
-          if (!el.duration || el.duration < 10) return;
-          lastSave = now;
-          timeline.time = Math.round(el.currentTime);
-          timeline.duration = Math.round(el.duration);
-          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-          Lampa.Timeline.update(timeline);
+        var play = {
+          url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
+          title: best.title + ' [' + bestQuality + 'p]',
+          subtitles: []
         };
 
-        el.addEventListener('timeupdate', savePos);
-        el.addEventListener('pause', savePos);
-        el.addEventListener('ended', savePos);
-
-        var doRestore = function() {
-          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-            el.currentTime = timeline.time;
-            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+        if (mp4Qualities.length > 1) {
+          play.quality = {};
+          for (var i = 0; i < mp4Qualities.length; i++) {
+            play.quality[mp4Qualities[i]] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
           }
+        }
+
+        var hash = getTimelineHash(movie, 'VK');
+        var timeline = Lampa.Timeline.view(hash);
+        play.timeline = timeline;
+
+        var beholdHash = getBeholdHash(movie, 'VK');
+        markViewed(beholdHash);
+
+        window._iframe_cloud_current = {
+          timeline: timeline,
+          beholdHash: beholdHash,
+          movie: movie,
+          label: 'VK'
         };
 
-        if (el.readyState >= 1) doRestore();
-        else el.addEventListener('loadedmetadata', doRestore);
-      }, 1500);
+        Lampa.Player.play(play);
+        Lampa.Player.playlist([play]);
+
+        setTimeout(function() {
+          var el = document.querySelector('video');
+          if (!el) return;
+
+          var lastSave = 0;
+          var savePos = function() {
+            var now = Date.now();
+            if (now - lastSave < 3000) return;
+            if (!el.duration || el.duration < 10) return;
+            lastSave = now;
+            timeline.time = Math.round(el.currentTime);
+            timeline.duration = Math.round(el.duration);
+            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+            Lampa.Timeline.update(timeline);
+          };
+
+          el.addEventListener('timeupdate', savePos);
+          el.addEventListener('pause', savePos);
+          el.addEventListener('ended', savePos);
+
+          var doRestore = function() {
+            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+              el.currentTime = timeline.time;
+              Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+            }
+          };
+
+          if (el.readyState >= 1) doRestore();
+          else el.addEventListener('loadedmetadata', doRestore);
+        }, 1500);
+
+      }).catch(function(e) {
+        console.log('[iframe-cloud] VK info error:', e.message);
+        Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
+      });
 
     }).catch(function(e) {
       console.log('[iframe-cloud] VK search error:', e.message);

@@ -49,7 +49,7 @@ export default {
       return await handleVkStreamProxy(vkOwnerId, vkVideoId, vkQuality, vkQuery, vkYear, corsHeaders, request);
     }
 
-    return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY&year=YEAR or ?vkstream=URL or ?oid=X&vid=Y&qual=mp4_1080 or ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
+    return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY or ?vkstream=URL or ?oid=X&vid=Y&qual=mp4_NNN or ?kpu=URL or ?proxy=URL' }), {
       status: 400, headers: corsHeaders
     });
   }
@@ -333,7 +333,7 @@ async function handleVkStream(targetUrl, corsHeaders, request) {
 
 async function handleVkStreamProxy(ownerId, videoId, quality, query, year, corsHeaders, request) {
   try {
-    var mp4Url = null;
+    var debug = request.url.indexOf('debug=1') !== -1;
 
     var embedUrl = 'https://vk.com/video_ext.php?oid=' + ownerId + '&id=' + videoId;
     var embedResp = await fetch(embedUrl, {
@@ -346,52 +346,111 @@ async function handleVkStreamProxy(ownerId, videoId, quality, query, year, corsH
     });
     var html = await embedResp.text();
 
-    var qualityPriority = [quality, 'mp4_1080', 'mp4_720', 'mp4_480', 'mp4_360'];
-    for (var p = 0; p < qualityPriority.length; p++) {
-      var qKey = qualityPriority[p];
-      var re = new RegExp('"' + qKey + '"\\s*:\\s*"(https?:\\\\/\\\\/[^"]+)"');
+    var result = { owner_id: ownerId, video_id: videoId, mp4: {}, dash: null, hls: null };
+
+    var qualityMap = [
+      ['mp4_2160', 2160], ['mp4_1440', 1440], ['mp4_1080', 1080],
+      ['mp4_720', 720], ['mp4_480', 480], ['mp4_360', 360], ['mp4_240', 240]
+    ];
+
+    for (var q = 0; q < qualityMap.length; q++) {
+      var qName = qualityMap[q][0];
+      var re = new RegExp('"' + qName + '"\\s*:\\s*"(https?[^"]+)"');
       var m = html.match(re);
       if (m && m[1]) {
-        mp4Url = m[1].replace(/\\\//g, '/');
+        result.mp4[qualityMap[q][1] + 'p'] = m[1].replace(/\\\//g, '/');
+      }
+    }
+
+    var dashRe = new RegExp('"dash_uni"\\s*:\\s*"(https?[^"]+)"');
+    var dashMatch = html.match(dashRe);
+    if (!dashMatch) {
+      dashRe = new RegExp('"dash"\\s*:\\s*"(https?[^"]+)"');
+      dashMatch = html.match(dashRe);
+    }
+    if (dashMatch && dashMatch[1]) {
+      result.dash = dashMatch[1].replace(/\\\//g, '/');
+    }
+
+    var hlsRe = new RegExp('"hls"\\s*:\\s*"(https?[^"]+)"');
+    var hlsMatch = html.match(hlsRe);
+    if (hlsMatch && hlsMatch[1]) {
+      result.hls = hlsMatch[1].replace(/\\\//g, '/');
+    }
+
+    if (debug) {
+      var snippets = [];
+      var allUrls = html.match(/https?:\/\/[^\s"'<>]+/g);
+      if (allUrls) {
+        var unique = [];
+        var seen = {};
+        for (var ui = 0; ui < allUrls.length; ui++) {
+          var u = allUrls[ui].replace(/\\\//g, '/');
+          if (!seen[u]) { seen[u] = true; unique.push(u); }
+        }
+        snippets = unique.slice(0, 20);
+      }
+      result.debug = { html_length: html.length, urls_found: snippets.length, urls: snippets };
+    }
+
+    var bestUrl = null;
+    var qualityPriority = [quality, 'mp4_2160', 'mp4_1440', 'mp4_1080', 'mp4_720', 'mp4_480', 'mp4_360'];
+    for (var p = 0; p < qualityPriority.length; p++) {
+      var qKey = qualityPriority[p];
+      var re2 = new RegExp('"' + qKey + '"\\s*:\\s*"(https?[^"]+)"');
+      var m2 = html.match(re2);
+      if (m2 && m2[1]) {
+        bestUrl = m2[1].replace(/\\\//g, '/');
         break;
       }
     }
 
-    if (!mp4Url) {
-      var allMp4 = html.match(/https?:\/\/vkvd\d+\.okcdn\.ru\/\?[^\s"'<>]+/g);
-      if (allMp4 && allMp4.length) {
-        mp4Url = allMp4[0].replace(/\\\//g, '/');
+    if (!bestUrl) {
+      var allMp4Urls = html.match(/https?:\/\/vkvd\d+[^\s"'<>]+/g);
+      if (allMp4Urls && allMp4Urls.length) {
+        bestUrl = allMp4Urls[0].replace(/\\\//g, '/');
       }
     }
 
-    if (!mp4Url) {
-      return new Response(JSON.stringify({ error: 'No mp4 URL in embed page', owner_id: ownerId, video_id: videoId }), { status: 404, headers: corsHeaders });
+    result.best_mp4 = bestUrl;
+
+    if (debug) {
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+      });
     }
 
-    var target = new URL(mp4Url);
-    var reqHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Referer': 'https://vk.com/',
-      'Origin': 'https://vk.com'
-    };
-    if (request && request.headers) {
-      var range = request.headers.get('Range');
-      if (range) reqHeaders['Range'] = range;
+    if (request.url.indexOf('stream=1') !== -1) {
+      if (bestUrl) {
+        var reqHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Referer': 'https://vk.com/',
+          'Origin': 'https://vk.com'
+        };
+        if (request.headers) {
+          var range = request.headers.get('Range');
+          if (range) reqHeaders['Range'] = range;
+        }
+        var resp = await fetch(bestUrl, { headers: reqHeaders, redirect: 'follow' });
+        var respHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
+        var ct = resp.headers.get('Content-Type');
+        respHeaders['Content-Type'] = ct || 'video/mp4';
+        var cl = resp.headers.get('Content-Length');
+        if (cl) respHeaders['Content-Length'] = cl;
+        var cr = resp.headers.get('Content-Range');
+        if (cr) respHeaders['Content-Range'] = cr;
+        var ar = resp.headers.get('Accept-Ranges');
+        if (ar) respHeaders['Accept-Ranges'] = ar;
+        return new Response(resp.body, { status: resp.status, headers: respHeaders });
+      }
     }
 
-    var resp = await fetch(mp4Url, { headers: reqHeaders, redirect: 'follow' });
-    var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
-    var ct = resp.headers.get('Content-Type');
-    headers['Content-Type'] = ct || 'video/mp4';
-    var cl = resp.headers.get('Content-Length');
-    if (cl) headers['Content-Length'] = cl;
-    var cr = resp.headers.get('Content-Range');
-    if (cr) headers['Content-Range'] = cr;
-    var ar = resp.headers.get('Accept-Ranges');
-    if (ar) headers['Accept-Ranges'] = ar;
-    return new Response(resp.body, { status: resp.status, headers: headers });
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
