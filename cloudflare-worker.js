@@ -223,7 +223,12 @@ async function handleVkSearch(query, year, corsHeaders) {
       if (duration < 3000) continue;
 
       var titleLower = normalize(title);
-      if (titleLower.indexOf(searchTitle) === -1 && searchTitle.indexOf(titleLower) === -1) continue;
+
+      var words = searchTitle.split(/\s+/).filter(function(w) { return w.length > 2; });
+      var yearInTitle = searchYear && titleLower.indexOf(String(searchYear)) !== -1;
+      var wordMatch = words.length > 0 && words.some(function(w) { return titleLower.indexOf(w) !== -1; });
+
+      if (!yearInTitle && !wordMatch && words.length > 0) continue;
 
       if (titleLower.indexOf('трейлер') !== -1 || titleLower.indexOf('trailer') !== -1 ||
           titleLower.indexOf('премьера') !== -1 || titleLower.indexOf('обзор') !== -1 ||
