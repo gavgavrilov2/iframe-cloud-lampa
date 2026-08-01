@@ -224,11 +224,15 @@ async function handleVkSearch(query, year, corsHeaders) {
 
       var titleLower = normalize(title);
 
-      var words = searchTitle.split(/\s+/).filter(function(w) { return w.length > 2; });
-      var yearInTitle = searchYear && titleLower.indexOf(String(searchYear)) !== -1;
-      var wordMatch = words.length > 0 && words.some(function(w) { return titleLower.indexOf(w) !== -1; });
+      if (titleLower.indexOf('трейлер') !== -1 || titleLower.indexOf('trailer') !== -1 ||
+          titleLower.indexOf('премьера') !== -1 || titleLower.indexOf('обзор') !== -1 ||
+          titleLower.indexOf('сезон') !== -1 || titleLower.indexOf('серия') !== -1 ||
+          titleLower.indexOf('серий') !== -1 || titleLower.indexOf('концерт') !== -1 ||
+          titleLower.indexOf('клип') !== -1 || titleLower.indexOf('музыка') !== -1 ||
+          titleLower.indexOf('live') !== -1 || titleLower.indexOf('выступление') !== -1 ||
+          titleLower.indexOf('интервью') !== -1 || titleLower.indexOf('видеоклип') !== -1) continue;
 
-      if (!yearInTitle && !wordMatch && words.length > 0) continue;
+      if (searchYear && titleLower.indexOf(String(searchYear)) === -1) continue;
 
       if (titleLower.indexOf('трейлер') !== -1 || titleLower.indexOf('trailer') !== -1 ||
           titleLower.indexOf('премьера') !== -1 || titleLower.indexOf('обзор') !== -1 ||
