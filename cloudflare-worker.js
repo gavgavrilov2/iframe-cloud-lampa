@@ -76,8 +76,7 @@ async function handleProxy(targetUrl, corsHeaders) {
     if (targetUrl.startsWith('//')) targetUrl = 'https:' + targetUrl;
     var target = new URL(targetUrl);
     var referer = target.origin + '/';
-    var resp = await fetch(targetUrl, {
-      headers: {
+    var reqHeaders = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -92,9 +91,12 @@ async function handleProxy(targetUrl, corsHeaders) {
         'Sec-Fetch-User': '?1',
         'Upgrade-Insecure-Requests': '1',
         'Cache-Control': 'max-age=0'
-      },
-      redirect: 'follow'
-    });
+    };
+    if (targetUrl.indexOf('api.kinopoisk.dev') !== -1) {
+      reqHeaders['X-Api-Token'] = '05047400-1a7c-4342-b07c-229f25354196';
+      reqHeaders['Accept'] = 'application/json';
+    }
+    var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
     var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
     var ct = resp.headers.get('Content-Type');
     headers['Content-Type'] = ct || 'text/html; charset=utf-8';
