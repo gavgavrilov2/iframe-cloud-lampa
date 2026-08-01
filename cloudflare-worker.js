@@ -267,7 +267,13 @@ async function handleVkSearch(query, year, corsHeaders) {
           titleLower.indexOf('серий') !== -1 || titleLower.indexOf('концерт') !== -1 ||
           titleLower.indexOf('клип') !== -1 || titleLower.indexOf('музыка') !== -1 ||
           titleLower.indexOf('live') !== -1 || titleLower.indexOf('выступление') !== -1 ||
-          titleLower.indexOf('интервью') !== -1 || titleLower.indexOf('видеоклип') !== -1) continue;
+          titleLower.indexOf('интервью') !== -1 || titleLower.indexOf('видеоклип') !== -1 ||
+          titleLower.indexOf('киноаук') !== -1 || titleLower.indexOf('шоу') !== -1 ||
+          titleLower.indexOf('смотрим') !== -1 || titleLower.indexOf('стрим') !== -1 ||
+          titleLower.indexOf('stream') !== -1 || titleLower.indexOf('комментарий') !== -1 ||
+          titleLower.indexOf('комментари') !== -1 || titleLower.indexOf('реакция') !== -1 ||
+          titleLower.indexOf('reaction') !== -1 || titleLower.indexOf('разбор') !== -1 ||
+          titleLower.indexOf('топ') !== -1 || titleLower.indexOf('подборк') !== -1) continue;
 
       if (searchYear && titleLower.indexOf(String(searchYear)) === -1) continue;
 
@@ -312,7 +318,28 @@ async function handleVkSearch(query, year, corsHeaders) {
       });
     }
 
+    for (var s = 0; s < videos.length; s++) {
+      var v = videos[s];
+      var t = normalize(v.title);
+      var score = 0;
+      var searchNorm = normalize(query);
+      if (t.indexOf(searchNorm) === 0) score += 100;
+      else if (t.indexOf(searchNorm) !== -1) score += 50;
+      var junkChars = (v.title.match(/[!⚡🔥💬💰🎪🎭🏷🎮🎯🎲💊🎁🎈🎁📌🔔⭐💯✨🆕🆙]/g) || []).length;
+      score -= junkChars * 10;
+      if (v.title.indexOf('!') !== -1) score -= 30;
+      var exclamationCount = (v.title.match(/!/g) || []).length;
+      if (exclamationCount > 1) score -= exclamationCount * 10;
+      if (t.indexOf(searchNorm + ' (') !== -1 || t.indexOf(searchNorm + ' (') !== -1) score += 80;
+      var cleanFormats = ['(' + searchYear + ')', searchYear + 'г', 'HD', 'FHD', 'BDRip', '1080', '720'];
+      for (var cf = 0; cf < cleanFormats.length; cf++) {
+        if (v.title.indexOf(cleanFormats[cf]) !== -1) score += 10;
+      }
+      v.score = score;
+    }
+
     videos.sort(function(a, b) {
+      if (b.score !== a.score) return b.score - a.score;
       if (b.quality !== a.quality) {
         var qOrder = { '2160p': 6, '1440p': 5, '1080p': 4, '720p': 3, '480p': 2, '360p': 1, '240p': 0 };
         return (qOrder[b.quality] || 0) - (qOrder[a.quality] || 0);
