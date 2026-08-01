@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.20.1');
+  console.log('[iframe-cloud] Loading v5.20.2');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -813,23 +813,20 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var container = $('<div class="iframe-cloud-card" style="margin-top:0.5em;"></div>');
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.2"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
-    container.append(btn);
+    render.after(btn);
 
     try {
       var hash = getTimelineHash(movie);
       var timeline = Lampa.Timeline.view(hash);
       if (timeline && timeline.time > 0) {
         var tl = Lampa.Timeline.render(timeline);
-        if (tl) container.append(tl);
+        if (tl) btn.after(tl);
       }
     } catch (e) {
       console.log('[iframe-cloud] Timeline render error:', e.message);
     }
-
-    render.after(container);
   }
 
   var buttonAdded = false;
@@ -856,7 +853,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.20.1', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.20.2', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
