@@ -1,6 +1,6 @@
 {
   "type": "video",
-  "version": "5.18.0",
+  "version": "5.18.1",
   "name": "Iframe Cloud",
   "description": "Плагин для просмотра фильмов через iframe.cloud",
   "component": "iframe_cloud"

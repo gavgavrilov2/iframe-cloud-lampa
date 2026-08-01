@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.18.0');
+  console.log('[iframe-cloud] Loading v5.18.1');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -173,6 +173,11 @@
     var s = (p.source || '').toLowerCase();
     var u = (p.url || '').toLowerCase();
     return s.indexOf('veoveo') !== -1 || u.indexOf('veoveo') !== -1;
+  }
+
+  function isAllohaOrTurbo(p) {
+    var s = (p.source || '').toLowerCase();
+    return s.indexOf('alloha') !== -1 || s.indexOf('turbo') !== -1;
   }
 
   /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
@@ -475,7 +480,7 @@
     var kpId = kpMatch[1];
 
     fetchJsonViaProxy(IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId).then(function(data) {
-      var players = (data.players || []).filter(function(p) { return !isVeoveo(p); });
+      var players = (data.players || []).filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
       if (!players.length) {
         Lampa.Loading.stop();
@@ -646,7 +651,7 @@
         console.log('[iframe-cloud] KP ID:', kpId);
 
         return getPlayersWithRetry(kpId).then(function(players) {
-          players = players.filter(function(p) { return !isVeoveo(p); });
+          players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
           if (!players.length) {
             Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043b\u0435\u0435\u0440\u044b \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b');
@@ -662,7 +667,7 @@
           });
 
           items.push({
-            title: '\ud83c\udf10 \u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0432 \u0431\u0440\u0430\u0437\u0435\u0440\u0435',
+            title: '\ud83c\udf10 \u0412\u0441\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438',
             subtitle: 'iframe.cloud',
             _browser: true,
             _cloudUrl: IFRAME_CLOUD_BASE + kpId
@@ -705,7 +710,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.18.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.18.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -734,7 +739,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.17.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.18.1', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
