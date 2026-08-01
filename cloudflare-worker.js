@@ -93,7 +93,6 @@ async function handleProxy(targetUrl, corsHeaders) {
         'Cache-Control': 'max-age=0'
     };
     if (targetUrl.indexOf('api.kinopoisk.dev') !== -1) {
-      reqHeaders['X-Api-Token'] = 'WYVHF8M-XKBM92B-JD2ZQ8R-EPZ37AQ';
       reqHeaders['Accept'] = 'application/json';
     }
     var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
