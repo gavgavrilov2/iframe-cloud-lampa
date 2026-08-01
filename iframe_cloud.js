@@ -500,9 +500,7 @@
             var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
             play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
           }
-          if (info.hls) {
-            play.quality['HLS \u{1F50A}'] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&hls=1';
-          }
+
         }
 
         var hash = getTimelineHash(movie, 'VK');
