@@ -128,6 +128,8 @@ async function handleProxy(targetUrl, corsHeaders, request) {
     var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
     var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
     var ct = resp.headers.get('Content-Type');
+    var isM3u8 = ct && ct.indexOf('mpegurl') !== -1;
+    if (!isM3u8 && targetUrl.indexOf('.m3u8') !== -1) isM3u8 = true;
     headers['Content-Type'] = ct || 'video/mp4';
     var cl = resp.headers.get('Content-Length');
     if (cl) headers['Content-Length'] = cl;
@@ -135,6 +137,11 @@ async function handleProxy(targetUrl, corsHeaders, request) {
     if (cr) headers['Content-Range'] = cr;
     var ar = resp.headers.get('Accept-Ranges');
     if (ar) headers['Accept-Ranges'] = ar;
+    if (isM3u8) {
+      var body = await resp.text();
+      var rewritten = rewriteM3u8Urls(body, targetUrl);
+      return new Response(rewritten, { status: resp.status, headers: headers });
+    }
     return new Response(resp.body, { status: resp.status, headers: headers });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
@@ -490,7 +497,7 @@ function rewriteM3u8Urls(m3u8, baseUrl) {
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
-    if (!line || line.startsWith('#')) continue;
+    if (!line || line.startsWith('#') || line.indexOf('/?proxy=') === 0) continue;
 
     var fullUrl = line;
     if (line.indexOf('http') !== 0) {
