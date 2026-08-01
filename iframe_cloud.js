@@ -859,84 +859,8 @@
 
   function openPlugin(movie) {
     var id = movie.id;
-    if (!id) { Lampa.Noty.show('\u041d\u0435\u0442 ID \u0444\u0438\u043b\u044c\u043c\u0430'); return; }
-    var title = movie.title || movie.name || '';
-
-    Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0438\u0441\u043a...');
-
-    getKinopoiskId(movie)
-      .then(function(kpId) {
-        if (!kpId) {
-          Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
-          return;
-        }
-
-        console.log('[iframe-cloud] KP ID:', kpId);
-
-        return getPlayersWithRetry(kpId).then(function(players) {
-          players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
-
-          if (!players.length) {
-            Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043b\u0435\u0435\u0440\u044b \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b');
-            return;
-          }
-
-          var items = players.map(function(p, i) {
-            return {
-              title: p.source + ' \u2014 ' + (p.translate || ''),
-              subtitle: (p.quality || '') + ' ' + PLUGIN_NAME,
-              _player: p, _index: i
-            };
-          });
-
-          items.push({
-            title: PLUGIN_NAME + ' VK — ' + title,
-            subtitle: '2160p-4K MP4',
-            _vk: true,
-            _movie: movie
-          });
-
-          items.push({
-            title: '\ud83c\udf10 \u0412\u0441\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438',
-            subtitle: PLUGIN_NAME,
-            _browser: true,
-            _cloudUrl: IFRAME_CLOUD_BASE + kpId
-          });
-
-          Lampa.Select.show({
-            title: PLUGIN_NAME + ' \u2014 ' + title,
-            items: items,
-            onSelect: function(item) {
-              if (item._vk) {
-                searchAndPlayVk(item._movie);
-                return;
-              }
-
-              if (item._browser) {
-                playIframeCloud(item._cloudUrl, title, movie);
-                return;
-              }
-
-              var p = item._player;
-              var pLabel = p.source + ' (' + (p.translate || '') + ')';
-
-              var isOrt = (p.url || '').indexOf('ortified.ws') !== -1;
-
-              if (isOrt) {
-                playOrtified(p.url, pLabel, title, function() {
-                  tryNextPlayer(players, item._index, title);
-                }, movie);
-              } else {
-                showIframePlayer(p.url, pLabel);
-              }
-            }
-          });
-        });
-      })
-      .catch(function(e) {
-        console.log('[iframe-cloud] Error:', e.message);
-        Lampa.Noty.show(PLUGIN_NAME + ': \u043e\u0448\u0438\u0431\u043a\u0430');
-      });
+    if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID фильма'); return; }
+    searchAndPlayVk(movie);
   }
 
   /* ---- Plugin registration ---- */
