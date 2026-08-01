@@ -335,71 +335,37 @@ async function handleVkStreamProxy(ownerId, videoId, quality, query, year, corsH
   try {
     var mp4Url = null;
 
-    if (query) {
-      try {
-        var token = await getVkToken();
-        if (token) {
-          var searchQ = query + (year ? ' ' + year : '');
-          var body = 'v=5.264&client_id=' + VK_CLIENT_ID + '&q=' + encodeURIComponent(searchQ) + '&access_token=' + token;
-          var searchResp = await fetch('https://api.vkvideo.ru/method/catalog.getVideoSearchWeb2', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body
-          });
-          var searchJson = await searchResp.json();
-          var items = (searchJson.response && searchJson.response.catalog_videos) || [];
-
-          for (var i = 0; i < items.length; i++) {
-            var v = items[i].video;
-            if (!v || !v.files) continue;
-            if (String(v.owner_id) !== String(ownerId) || String(v.id) !== String(videoId)) continue;
-
-            var qList = [quality, 'mp4_1080', 'mp4_720', 'mp4_480', 'mp4_360'];
-            for (var q = 0; q < qList.length; q++) {
-              if (v.files[qList[q]]) {
-                mp4Url = v.files[qList[q]];
-                break;
-              }
-            }
-            break;
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (!mp4Url) {
-      var embedUrl = 'https://vk.com/video_ext.php?oid=' + ownerId + '&id=' + videoId;
-      var embedResp = await fetch(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
-          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Referer': 'https://vk.com/'
-        }
-      });
-      var html = await embedResp.text();
-
-      var qualityPriority = [quality, 'mp4_720', 'mp4_480', 'mp4_360'];
-      for (var p = 0; p < qualityPriority.length; p++) {
-        var qKey = qualityPriority[p];
-        var re = new RegExp('"' + qKey + '"\\s*:\\s*"(https?:\\\\/\\\\/[^"]+)"');
-        var m = html.match(re);
-        if (m && m[1]) {
-          mp4Url = m[1].replace(/\\\//g, '/');
-          break;
-        }
+    var embedUrl = 'https://vk.com/video_ext.php?oid=' + ownerId + '&id=' + videoId;
+    var embedResp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://vk.com/'
       }
+    });
+    var html = await embedResp.text();
 
-      if (!mp4Url) {
-        var allMp4 = html.match(/https?:\/\/vkvd\d+\.okcdn\.ru\/\?[^\s"'<>]+/g);
-        if (allMp4 && allMp4.length) {
-          mp4Url = allMp4[0].replace(/\\\//g, '/');
-        }
+    var qualityPriority = [quality, 'mp4_1080', 'mp4_720', 'mp4_480', 'mp4_360'];
+    for (var p = 0; p < qualityPriority.length; p++) {
+      var qKey = qualityPriority[p];
+      var re = new RegExp('"' + qKey + '"\\s*:\\s*"(https?:\\\\/\\\\/[^"]+)"');
+      var m = html.match(re);
+      if (m && m[1]) {
+        mp4Url = m[1].replace(/\\\//g, '/');
+        break;
       }
     }
 
     if (!mp4Url) {
-      return new Response(JSON.stringify({ error: 'No mp4 URL found', owner_id: ownerId, video_id: videoId }), { status: 404, headers: corsHeaders });
+      var allMp4 = html.match(/https?:\/\/vkvd\d+\.okcdn\.ru\/\?[^\s"'<>]+/g);
+      if (allMp4 && allMp4.length) {
+        mp4Url = allMp4[0].replace(/\\\//g, '/');
+      }
+    }
+
+    if (!mp4Url) {
+      return new Response(JSON.stringify({ error: 'No mp4 URL in embed page', owner_id: ownerId, video_id: videoId }), { status: 404, headers: corsHeaders });
     }
 
     var target = new URL(mp4Url);
