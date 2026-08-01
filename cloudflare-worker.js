@@ -234,11 +234,6 @@ async function handleVkSearch(query, year, corsHeaders) {
 
       if (searchYear && titleLower.indexOf(String(searchYear)) === -1) continue;
 
-      if (titleLower.indexOf('трейлер') !== -1 || titleLower.indexOf('trailer') !== -1 ||
-          titleLower.indexOf('премьера') !== -1 || titleLower.indexOf('обзор') !== -1 ||
-          titleLower.indexOf('сезон') !== -1 || titleLower.indexOf('серия') !== -1 ||
-          titleLower.indexOf('серий') !== -1) continue;
-
       var qualities = {};
       var bestUrl = null;
       var bestQuality = 0;
