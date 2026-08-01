@@ -1,6 +1,6 @@
 {
   "type": "video",
-  "version": "5.27.0",
+  "version": "5.28.0",
   "name": "MovieZone",
   "description": "VK Video + Collaps + Ortvified",
   "component": "iframe_cloud"

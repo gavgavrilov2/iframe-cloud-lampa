@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.27.0');
+  console.log('[MovieZone] Loading v5.28.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -520,15 +520,16 @@
         };
 
         try {
-          var cardForHistory = {
+          Lampa.Favorite.add('history', {
             id: movie.id,
             title: movie.title || movie.name || '',
             original_title: movie.original_title || '',
-            poster: movie.poster_path ? 'https://image.tmdb.org/t/p/w300' + movie.poster_path : '',
-            year: getYear(movie),
-            card: movie
-          };
-          Lampa.Favorites.add('history', cardForHistory, PLUGIN_NAME);
+            poster_path: movie.poster_path || '',
+            release_date: movie.release_date || movie.first_air_date || '',
+            original_language: movie.original_language || 'ru',
+            vote_average: movie.vote_average || 0,
+            source: 'tmdb'
+          }, 100);
         } catch (e) {
           console.log('[iframe-cloud] History error:', e.message);
         }
@@ -873,16 +874,25 @@
 
   /* ---- Main flow ---- */
 
+  function isTvSeries(movie) {
+    return movie.type === 'tv' || (movie.number_of_seasons && movie.number_of_seasons > 0) || (!movie.release_date && movie.first_air_date);
+  }
+
   function openPlugin(movie) {
     var id = movie.id;
     if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID'); return; }
     var title = movie.title || movie.name || '';
+    var tv = isTvSeries(movie);
 
     Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
     getKinopoiskId(movie)
       .then(function(kpId) {
         if (!kpId) {
+          if (tv) {
+            Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+            return;
+          }
           searchAndPlayVk(movie);
           return;
         }
@@ -893,6 +903,10 @@
           players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
           if (!players.length) {
+            if (tv) {
+              Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+              return;
+            }
             searchAndPlayVk(movie);
             return;
           }
@@ -905,11 +919,20 @@
             };
           });
 
+          if (!tv) {
+            items.push({
+              title: PLUGIN_NAME + ' VK — ' + title,
+              subtitle: '2160p-4K MP4',
+              _vk: true,
+              _movie: movie
+            });
+          }
+
           items.push({
-            title: PLUGIN_NAME + ' VK — ' + title,
-            subtitle: '2160p-4K MP4',
-            _vk: true,
-            _movie: movie
+            title: '\ud83c\udf10 Все источники',
+            subtitle: PLUGIN_NAME,
+            _browser: true,
+            _cloudUrl: IFRAME_CLOUD_BASE + kpId
           });
 
           Lampa.Select.show({
@@ -918,6 +941,11 @@
             onSelect: function(item) {
               if (item._vk) {
                 searchAndPlayVk(item._movie);
+                return;
+              }
+
+              if (item._browser) {
+                playIframeCloud(item._cloudUrl, title, movie);
                 return;
               }
 
@@ -939,7 +967,11 @@
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
-        searchAndPlayVk(movie);
+        if (!isTvSeries(movie)) {
+          searchAndPlayVk(movie);
+        } else {
+          Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+        }
       });
   }
 
@@ -989,7 +1021,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.27.0', name: PLUGIN_NAME, description: 'VK Video', component: 'iframe_cloud',
+      type: 'video', version: '5.28.0', name: PLUGIN_NAME, description: 'VK Video', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
