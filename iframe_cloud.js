@@ -690,7 +690,7 @@
   }
 
   function playKinogoEmbed(embedUrl, result, movie) {
-    var multiUrl = WORKER_URL + '/?kinogo_multi=' + encodeURIComponent(embedUrl);
+    var multiUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
 
     console.log('[iframe-cloud] Kinogo multi-audio URL:', multiUrl.substring(0, 120));
 

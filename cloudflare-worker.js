@@ -29,6 +29,11 @@ export default {
     const kinogoStream = url.searchParams.get('kinogo_stream');
     const kinogoPage = url.searchParams.get('kinogo_page');
 
+    var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
+    if (pathMatch) {
+      return await handleKinogoMulti(decodeURIComponent(pathMatch[1]).replace(/ /g, '+'), corsHeaders, request);
+    }
+
     if (kinogoMulti) {
       return await handleKinogoMulti(kinogoMulti.replace(/ /g, '+'), corsHeaders, request);
     }
@@ -1149,7 +1154,7 @@ async function handleKinogoStream(streamUrl, corsHeaders, request) {
 
     if (isM3u8) {
       var body = await resp.text();
-      var rewritten = rewriteKinogoUrls(body, decodedUrl);
+      var rewritten = rewriteKinogoUrls(body, decodedUrl, new URL(request.url).origin);
       return new Response(rewritten, { status: resp.status, headers: respHeaders });
     }
 
@@ -1159,13 +1164,13 @@ async function handleKinogoStream(streamUrl, corsHeaders, request) {
   }
 }
 
-function rewriteKinogoUrls(m3u8, baseUrl) {
+function rewriteKinogoUrls(m3u8, baseUrl, workerOrigin) {
   var lines = m3u8.split('\n');
   var baseDir = baseUrl.replace(/\/[^\/]*$/, '/');
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
-    if (!line || line.startsWith('#') || line.indexOf('/?kinogo_stream=') === 0 || line.indexOf('/?proxy=') === 0) continue;
+    if (!line || line.startsWith('#') || line.indexOf('kinogo_stream=') !== -1) continue;
 
     var fullUrl = line;
     if (line.indexOf('http') !== 0) {
@@ -1173,7 +1178,7 @@ function rewriteKinogoUrls(m3u8, baseUrl) {
       fullUrl = baseDir + line;
     }
 
-    lines[i] = '/?kinogo_stream=' + encodeURIComponent(fullUrl);
+    lines[i] = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(fullUrl);
   }
 
   return lines.join('\n');
