@@ -1,9 +1,9 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.26.0');
+  console.log('[MovieZone] Loading v5.26.0');
 
-  var PLUGIN_NAME = 'Iframe Cloud';
+  var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://iframe-cloud.fair-teller.workers.dev';
   var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
@@ -485,9 +485,11 @@
 
         Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
+        var qualityLabel = mp4Qualities.length > 1 ? mp4Qualities[mp4Qualities.length - 1] + 'p-' + mp4Qualities[0] + 'p' : bestQuality + 'p';
+
         var play = {
           url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
-          title: best.title + ' [' + bestQuality + 'p]',
+          title: PLUGIN_NAME + ' ' + qualityLabel + ' — ' + best.title,
           subtitles: []
         };
 
@@ -689,7 +691,7 @@
   }
 
   function playIframeCloud(cloudUrl, movieTitle, movie) {
-    Lampa.Loading.start('Iframe Cloud');
+    Lampa.Loading.start('MovieZone');
 
     var kpMatch = cloudUrl.match(/\/iframe\/(\d+)/);
     if (!kpMatch) {
@@ -882,21 +884,21 @@
           var items = players.map(function(p, i) {
             return {
               title: p.source + ' \u2014 ' + (p.translate || ''),
-              subtitle: p.quality || '',
+              subtitle: (p.quality || '') + ' ' + PLUGIN_NAME,
               _player: p, _index: i
             };
           });
 
           items.push({
-            title: 'VK \u0412\u0438\u0434\u0435\u043e \u2014 ' + title,
-            subtitle: '2-4K MP4',
+            title: PLUGIN_NAME + ' VK — ' + title,
+            subtitle: '2160p-4K MP4',
             _vk: true,
             _movie: movie
           });
 
           items.push({
             title: '\ud83c\udf10 \u0412\u0441\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438',
-            subtitle: 'iframe.cloud',
+            subtitle: PLUGIN_NAME,
             _browser: true,
             _cloudUrl: IFRAME_CLOUD_BASE + kpId
           });
@@ -943,7 +945,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.23.3"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="720p-4K"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
 
@@ -983,7 +985,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.23.3', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud + VK Video', component: 'iframe_cloud',
+      type: 'video', version: '5.26.0', name: PLUGIN_NAME, description: 'VK Video + Collaps + Ortvified', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

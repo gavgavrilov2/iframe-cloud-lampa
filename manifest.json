@@ -1,7 +1,7 @@
 {
   "type": "video",
   "version": "5.26.0",
-  "name": "Iframe Cloud",
-  "description": "Плагин для просмотра фильмов через iframe.cloud",
+  "name": "MovieZone",
+  "description": "VK Video + Collaps + Ortvified",
   "component": "iframe_cloud"
 }
