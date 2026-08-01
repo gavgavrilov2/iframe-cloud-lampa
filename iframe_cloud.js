@@ -519,20 +519,7 @@
           label: 'VK'
         };
 
-        try {
-          Lampa.Favorite.add('history', {
-            id: movie.id,
-            title: movie.title || movie.name || '',
-            original_title: movie.original_title || '',
-            poster_path: movie.poster_path || '',
-            release_date: movie.release_date || movie.first_air_date || '',
-            original_language: movie.original_language || 'ru',
-            vote_average: movie.vote_average || 0,
-            source: 'tmdb'
-          }, 100);
-        } catch (e) {
-          console.log('[iframe-cloud] History error:', e.message);
-        }
+        addToHistory(movie);
 
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
@@ -878,6 +865,23 @@
     return movie.type === 'tv' || (movie.number_of_seasons && movie.number_of_seasons > 0) || (!movie.release_date && movie.first_air_date);
   }
 
+  function addToHistory(movie) {
+    try {
+      Lampa.Favorite.add('history', {
+        id: movie.id,
+        title: movie.title || movie.name || '',
+        original_title: movie.original_title || '',
+        poster_path: movie.poster_path || '',
+        release_date: movie.release_date || movie.first_air_date || '',
+        original_language: movie.original_language || 'ru',
+        vote_average: movie.vote_average || 0,
+        source: 'tmdb'
+      }, 100);
+    } catch (e) {
+      console.log('[iframe-cloud] History error:', e.message);
+    }
+  }
+
   function openPlugin(movie) {
     var id = movie.id;
     if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID'); return; }
@@ -948,6 +952,8 @@
                 playIframeCloud(item._cloudUrl, title, movie);
                 return;
               }
+
+              addToHistory(movie);
 
               var p = item._player;
               var pLabel = p.source + ' (' + (p.translate || '') + ')';
