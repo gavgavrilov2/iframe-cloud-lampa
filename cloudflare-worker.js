@@ -991,9 +991,11 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       var item = playlist[i];
       if (!item.file) continue;
       var voiceName = item.title || 'Voice ' + (i + 1);
-      voiceName = voiceName.replace(/,/g, ' ');
+      voiceName = voiceName.replace(/<[^>]+>/g, '').replace(/,/g, ' ').trim();
+      if (!voiceName) voiceName = 'Voice ' + (i + 1);
       var voiceUrl = item.file;
       if (voiceUrl.indexOf('http') !== 0) voiceUrl = 'https:' + voiceUrl;
+      try { voiceUrl = decodeURIComponent(voiceUrl); } catch(e) {}
 
       var streamParam = encodeURIComponent(voiceUrl);
       var workerBase = new URL(request.url).origin;
@@ -1110,7 +1112,9 @@ function parseVariants(m3u8, baseProxyUrl) {
 
 async function handleKinogoStream(streamUrl, corsHeaders, request) {
   try {
-    var decodedUrl = decodeURIComponent(streamUrl);
+    var decodedUrl = streamUrl;
+    try { decodedUrl = decodeURIComponent(decodedUrl); } catch(e) {}
+    if (decodedUrl.indexOf('%') !== -1) { try { decodedUrl = decodeURIComponent(decodedUrl); } catch(e) {} }
     if (decodedUrl.indexOf('http') !== 0) decodedUrl = 'https:' + decodedUrl;
 
     var reqHeaders = {
@@ -1165,6 +1169,7 @@ function rewriteKinogoUrls(m3u8, baseUrl) {
 
     var fullUrl = line;
     if (line.indexOf('http') !== 0) {
+      if (line.indexOf('./') === 0) line = line.substring(2);
       fullUrl = baseDir + line;
     }
 
