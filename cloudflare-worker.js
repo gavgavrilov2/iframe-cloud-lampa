@@ -19,6 +19,16 @@ export default {
     const apiUrl = url.searchParams.get('api');
     const vkSearch = url.searchParams.get('vksearch');
     const vkYear = url.searchParams.get('year');
+    const fanfilmSearch = url.searchParams.get('fanfilm_search');
+    const fanfilmPage = url.searchParams.get('fanfilm_page');
+
+    if (fanfilmSearch) {
+      return await handleFanfilmSearch(fanfilmSearch, corsHeaders);
+    }
+
+    if (fanfilmPage) {
+      return await handleFanfilmPage(fanfilmPage, corsHeaders);
+    }
 
     if (vkSearch) {
       return await handleVkSearch(vkSearch, vkYear, corsHeaders);
@@ -591,5 +601,119 @@ async function handleVkHlsProxy(ownerId, videoId, corsHeaders) {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+const FANFILM_BASE = 'https://v16.fanfilm4k.media';
+const FANFILM_BLOCKLIST = ['pravoobladateljam','politika','contacts','about','policy','privacy','terms','faq','search','login','register','news','comments','sitemap','404','error'];
+
+function isFanfilmMovieUrl(url) {
+  var slug = url.split('/').pop().replace('.html', '').toLowerCase();
+  for (var i = 0; i < FANFILM_BLOCKLIST.length; i++) {
+    if (slug.indexOf(FANFILM_BLOCKLIST[i]) !== -1) return false;
+  }
+  if (!/\d{4}/.test(slug)) return false;
+  return true;
+}
+
+async function handleFanfilmSearch(query, corsHeaders) {
+  try {
+    var body = 'do=search&subaction=search&story=' + encodeURIComponent(query) + '&search_start=0&full_search=0&result_from=1';
+    var resp = await fetch(FANFILM_BASE + '/index.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': FANFILM_BASE + '/',
+        'Origin': FANFILM_BASE
+      },
+      body: body
+    });
+    var html = await resp.text();
+    var results = [];
+    var re = /<a[^>]*href="([^"]*\.html)"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*>/g;
+    var m;
+    var seen = {};
+    while ((m = re.exec(html)) !== null) {
+      var pUrl = m[1].trim();
+      var pPoster = m[2].trim();
+      if (pUrl.indexOf('http') !== 0) pUrl = FANFILM_BASE + pUrl;
+      if (pPoster.indexOf('http') !== 0) pPoster = FANFILM_BASE + pPoster;
+      if (seen[pUrl]) continue;
+      if (!isFanfilmMovieUrl(pUrl)) continue;
+      seen[pUrl] = true;
+      var slug = pUrl.split('/').pop().replace('.html', '');
+      var allYears = slug.match(/(19\d{2}|20\d{2})/g);
+      var yearMatch = allYears ? allYears[allYears.length - 1] : null;
+      var titleFromSlug = slug.replace(/^\d+-/, '').replace(/-\d{4}$/, '').replace(/-/g, ' ');
+      var title = titleFromSlug.charAt(0).toUpperCase() + titleFromSlug.slice(1);
+      if (yearMatch) title += ' (' + yearMatch + ')';
+      results.push({ title: title, url: pUrl, poster: pPoster });
+    }
+    return new Response(JSON.stringify({ results: results.slice(0, 10) }), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, results: [] }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
+async function handleFanfilmPage(pageUrl, corsHeaders) {
+  try {
+    var resp = await fetch(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': FANFILM_BASE + '/'
+      }
+    });
+    var html = await resp.text();
+    var data = { url: pageUrl, title: '', year: '', poster: '', kpId: '', iframeUrl: '', quality: '', rating: '' };
+
+    var h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+    if (h1Match) data.title = h1Match[1].replace(/<[^>]+>/g, '').trim();
+
+    var titleTag = html.match(/<title[^>]*>([\s\S]*?)<\/title>/);
+    if (titleTag && !data.title) data.title = titleTag[1].replace(/<[^>]+>/g, '').split('—')[0].trim();
+
+    var yearMatch = html.match(/pmovie__original-title[^>]*>[\s\S]*?(\d{4})/);
+    if (!yearMatch) yearMatch = html.match(/<title[^>]*>.*?(\d{4})/);
+    if (yearMatch) data.year = yearMatch[1];
+
+    var posterMatch = html.match(/ya:ovs:poster"\s*content="([^"]*)"/);
+    if (!posterMatch) posterMatch = html.match(/og:image"\s*content="([^"]*)"/);
+    if (posterMatch) {
+      data.poster = posterMatch[1];
+      if (data.poster.indexOf('http') !== 0) data.poster = FANFILM_BASE + data.poster;
+    }
+
+    var kpMatch = html.match(/data-id="(\d+)"/);
+    if (kpMatch) data.kpId = kpMatch[1];
+
+    var iframeMatch = html.match(/<iframe[^>]*src="(https?:\/\/[^"]*stravers\.live[^"]*)"[^>]*>/);
+    if (iframeMatch) data.iframeUrl = iframeMatch[1];
+
+    if (html.indexOf('4K') !== -1) data.quality = '4K';
+    else if (html.indexOf('1080') !== -1) data.quality = '1080p';
+    else data.quality = 'HD';
+
+    var ratingMatch = html.match(/rating-value[^>]*>([\d.,]+)/);
+    if (ratingMatch) data.rating = ratingMatch[1].replace(',', '.');
+
+    var skipPages = ['правообладателям','политика','контакты','о нас'];
+    if (skipPages.indexOf((data.title || '').toLowerCase()) !== -1 || !data.iframeUrl) {
+      return new Response(JSON.stringify({ error: 'not a movie page', url: pageUrl, title: data.title }), {
+        status: 200, headers: corsHeaders
+      });
+    }
+
+    return new Response(JSON.stringify(data), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 200, headers: corsHeaders
+    });
   }
 }
