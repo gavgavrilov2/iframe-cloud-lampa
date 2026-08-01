@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.20.2');
+  console.log('[iframe-cloud] Loading v5.21.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -442,6 +442,105 @@
     });
   }
 
+  /* ---- VK Video search ---- */
+
+  function searchAndPlayVk(movie) {
+    var title = movie.original_title || movie.title || movie.name || '';
+    var year = getYear(movie);
+    var query = title + (year ? ' ' + year : '');
+
+    Lampa.Noty.show(PLUGIN_NAME + ': VK поиск — ' + title + '...');
+
+    fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
+      var videos = data.videos || [];
+
+      if (!videos.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': VK — ничего не найдено');
+        return;
+      }
+
+      var best = videos[0];
+      console.log('[iframe-cloud] VK found:', best.title, best.quality, best.duration + 's');
+
+      var titleTime = '';
+      if (best.duration > 0) {
+        var h = Math.floor(best.duration / 3600);
+        var m = Math.floor((best.duration % 3600) / 60);
+        titleTime = h > 0 ? h + 'ч ' + m + 'мин' : m + ' мин';
+      }
+
+      Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + best.quality + ', ' + titleTime + ')');
+
+      var play = {
+        url: best.url,
+        title: best.title + ' [' + best.quality + ']',
+        subtitles: []
+      };
+
+      if (best.qualities && Object.keys(best.qualities).length > 1) {
+        play.quality = {};
+        var qKeys = Object.keys(best.qualities).sort(function(a, b) {
+          return parseInt(b) - parseInt(a);
+        });
+        for (var i = 0; i < qKeys.length; i++) {
+          play.quality[qKeys[i]] = best.qualities[qKeys[i]];
+        }
+      }
+
+      var hash = getTimelineHash(movie, 'VK');
+      var timeline = Lampa.Timeline.view(hash);
+      play.timeline = timeline;
+
+      var beholdHash = getBeholdHash(movie, 'VK');
+      markViewed(beholdHash);
+
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: 'VK'
+      };
+
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          timeline.time = Math.round(el.currentTime);
+          timeline.duration = Math.round(el.duration);
+          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(timeline);
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+            el.currentTime = timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
+
+    }).catch(function(e) {
+      console.log('[iframe-cloud] VK search error:', e.message);
+      Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
+    });
+  }
+
   /* ---- iframe fallback (for non-ortified players or failures) ---- */
 
   function showIframePlayer(url, label, onClose) {
@@ -770,6 +869,13 @@
           });
 
           items.push({
+            title: 'VK \u0412\u0438\u0434\u0435\u043e \u2014 ' + title,
+            subtitle: '2-4K MP4',
+            _vk: true,
+            _movie: movie
+          });
+
+          items.push({
             title: '\ud83c\udf10 \u0412\u0441\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438',
             subtitle: 'iframe.cloud',
             _browser: true,
@@ -780,6 +886,11 @@
             title: PLUGIN_NAME + ' \u2014 ' + title,
             items: items,
             onSelect: function(item) {
+              if (item._vk) {
+                searchAndPlayVk(item._movie);
+                return;
+              }
+
               if (item._browser) {
                 playIframeCloud(item._cloudUrl, title, movie);
                 return;
@@ -813,7 +924,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.2"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.21.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
 
@@ -853,7 +964,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.20.2', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.21.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud + VK Video', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

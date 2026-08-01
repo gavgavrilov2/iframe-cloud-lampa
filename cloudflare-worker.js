@@ -2,7 +2,7 @@ export default {
   async fetch(request, env, ctx) {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS, POST',
       'Access-Control-Allow-Headers': 'Content-Type, X-API-KEY',
       'Content-Type': 'application/json'
     };
@@ -16,6 +16,12 @@ export default {
     const proxyUrl = url.searchParams.get('proxy');
     const apiKey = url.searchParams.get('apikey');
     const apiUrl = url.searchParams.get('api');
+    const vkSearch = url.searchParams.get('vksearch');
+    const vkYear = url.searchParams.get('year');
+
+    if (vkSearch) {
+      return await handleVkSearch(vkSearch, vkYear, corsHeaders);
+    }
 
     if (kpuUrl) {
       return await handleKpuProxy(kpuUrl, corsHeaders);
@@ -29,7 +35,7 @@ export default {
       return await handleProxy(proxyUrl, corsHeaders);
     }
 
-    return new Response(JSON.stringify({ error: 'Usage: ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
+    return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY&year=YEAR or ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
       status: 400, headers: corsHeaders
     });
   }
@@ -103,4 +109,155 @@ async function handleProxy(targetUrl, corsHeaders) {
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
+}
+
+/* ---- VK Video Search ---- */
+
+var VK_TOKEN_CACHE = { token: null, expires: 0 };
+
+var VK_CLIENT_ID = 52461373;
+var VK_CLIENT_SECRET = 'o557NLIkAErNhakXrQ7A';
+
+async function getVkToken() {
+  var now = Date.now();
+  if (VK_TOKEN_CACHE.token && VK_TOKEN_CACHE.expires > now) {
+    return VK_TOKEN_CACHE.token;
+  }
+
+  try {
+    var body = 'client_id=' + VK_CLIENT_ID +
+      '&client_secret=' + VK_CLIENT_SECRET +
+      '&scopes=video_anonymous' +
+      '&isApiOauthAnonymEnabled=false' +
+      '&version=1' +
+      '&app_id=6287487';
+
+    var resp = await fetch('https://login.vk.com/?act=get_anonym_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    });
+
+    var json = await resp.json();
+    var token = json && json.data && json.data.access_token;
+    var expires = json && json.data && (json.data.expires || json.data.expired_at);
+
+    if (token) {
+      VK_TOKEN_CACHE.token = token;
+      VK_TOKEN_CACHE.expires = expires
+        ? new Date(expires * 1000).getTime() - 14400000
+        : now + 36000000;
+      return token;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+async function handleVkSearch(query, year, corsHeaders) {
+  try {
+    var token = await getVkToken();
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'VK token failed', videos: [] }), {
+        status: 200, headers: corsHeaders
+      });
+    }
+
+    var searchQ = query;
+    if (year) searchQ += ' ' + year;
+
+    var body = 'v=5.264' +
+      '&client_id=' + VK_CLIENT_ID +
+      '&screen_ref=search_video_service' +
+      '&input_method=keyboard_search_button' +
+      '&q=' + encodeURIComponent(searchQ) +
+      '&access_token=' + token;
+
+    var resp = await fetch('https://api.vkvideo.ru/method/catalog.getVideoSearchWeb2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    });
+
+    var json = await resp.json();
+    var items = (json.response && json.response.catalog_videos) || [];
+
+    var searchTitle = normalize(query);
+    var searchYear = year ? parseInt(year) : null;
+
+    var videos = [];
+
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var video = item.video;
+      if (!video || !video.files) continue;
+
+      var title = video.title || '';
+      var duration = video.duration || 0;
+
+      if (duration < 3000) continue;
+
+      var titleLower = normalize(title);
+      if (titleLower.indexOf(searchTitle) === -1 && searchTitle.indexOf(titleLower) === -1) continue;
+
+      if (titleLower.indexOf('трейлер') !== -1 || titleLower.indexOf('trailer') !== -1 ||
+          titleLower.indexOf('премьера') !== -1 || titleLower.indexOf('обзор') !== -1 ||
+          titleLower.indexOf('сезон') !== -1 || titleLower.indexOf('серия') !== -1 ||
+          titleLower.indexOf('серий') !== -1) continue;
+
+      var qualities = {};
+      var bestUrl = null;
+      var bestQuality = 0;
+
+      var qualityMap = [
+        ['mp4_2160', 2160], ['mp4_1440', 1440], ['mp4_1080', 1080],
+        ['mp4_720', 720], ['mp4_480', 480], ['mp4_360', 360], ['mp4_240', 240]
+      ];
+
+      for (var q = 0; q < qualityMap.length; q++) {
+        var qName = qualityMap[q][0];
+        var qVal = qualityMap[q][1];
+        var qUrl = video.files[qName];
+        if (qUrl) {
+          qualities[qVal + 'p'] = qUrl;
+          if (!bestUrl || qVal > bestQuality) {
+            bestUrl = qUrl;
+            bestQuality = qVal;
+          }
+        }
+      }
+
+      if (!bestUrl) continue;
+
+      var preview = '';
+      if (video.image) {
+        preview = Array.isArray(video.image) ? (video.image[video.image.length - 1] || {}).url : (video.image.url || '');
+      }
+
+      videos.push({
+        title: title,
+        duration: duration,
+        quality: bestQuality + 'p',
+        url: bestUrl,
+        preview: preview,
+        qualities: qualities,
+        owner_id: video.owner_id,
+        video_id: video.id
+      });
+    }
+
+    videos.sort(function(a, b) { return b.duration - a.duration; });
+
+    return new Response(JSON.stringify({ videos: videos }), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, videos: [] }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
+function normalize(s) {
+  return (s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 }
