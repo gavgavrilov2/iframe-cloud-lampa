@@ -630,8 +630,18 @@ async function handleFanfilmSearch(query, corsHeaders) {
       body: body
     });
     var html = await resp.text();
+
+    var titles = {};
+    var titRe = /<div class="infoca">\s*<a href="([^"]*\.html)">([\s\S]*?)<\/a>/g;
+    var tm;
+    while ((tm = titRe.exec(html)) !== null) {
+      var tUrl = tm[1].trim();
+      var tTitle = tm[2].replace(/<[^>]+>/g, '').trim();
+      if (tTitle) titles[tUrl] = tTitle;
+    }
+
     var results = [];
-    var re = /<a[^>]*href="([^"]*\.html)"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*>/g;
+    var re = /<a[^>]*class="[^"]*card__img[^"]*"[^>]*href="([^"]*\.html)"[^>]*>\s*<img[^>]*src="([^"]*)"[^>]*>/g;
     var m;
     var seen = {};
     while ((m = re.exec(html)) !== null) {
@@ -642,12 +652,22 @@ async function handleFanfilmSearch(query, corsHeaders) {
       if (seen[pUrl]) continue;
       if (!isFanfilmMovieUrl(pUrl)) continue;
       seen[pUrl] = true;
-      var slug = pUrl.split('/').pop().replace('.html', '');
-      var allYears = slug.match(/(19\d{2}|20\d{2})/g);
-      var yearMatch = allYears ? allYears[allYears.length - 1] : null;
-      var titleFromSlug = slug.replace(/^\d+-/, '').replace(/-\d{4}$/, '').replace(/-/g, ' ');
-      var title = titleFromSlug.charAt(0).toUpperCase() + titleFromSlug.slice(1);
-      if (yearMatch) title += ' (' + yearMatch + ')';
+
+      var title = titles[pUrl] || '';
+      if (!title) {
+        var slug = pUrl.split('/').pop().replace('.html', '');
+        var allYears = slug.match(/(19\d{2}|20\d{2})/g);
+        var yearMatch = allYears ? allYears[allYears.length - 1] : null;
+        var titleFromSlug = slug.replace(/^\d+-/, '').replace(/-\d{4}$/, '').replace(/-/g, ' ');
+        title = titleFromSlug.charAt(0).toUpperCase() + titleFromSlug.slice(1);
+        if (yearMatch) title += ' (' + yearMatch + ')';
+      } else {
+        var slug2 = pUrl.split('/').pop().replace('.html', '');
+        var allYears2 = slug2.match(/(19\d{2}|20\d{2})/g);
+        var year2 = allYears2 ? allYears2[allYears2.length - 1] : null;
+        if (year2) title += ' (' + year2 + ')';
+      }
+
       results.push({ title: title, url: pUrl, poster: pPoster });
     }
     return new Response(JSON.stringify({ results: results.slice(0, 10) }), {
@@ -674,12 +694,18 @@ async function handleFanfilmPage(pageUrl, corsHeaders) {
     var h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
     if (h1Match) data.title = h1Match[1].replace(/<[^>]+>/g, '').trim();
 
-    var titleTag = html.match(/<title[^>]*>([\s\S]*?)<\/title>/);
-    if (titleTag && !data.title) data.title = titleTag[1].replace(/<[^>]+>/g, '').split('—')[0].trim();
+    var origMatch = html.match(/pmovie__original-title[^>]*>([\s\S]*?)<\/div>/);
+    if (origMatch) {
+      var origParts = origMatch[1].replace(/<[^>]+>/g, '').split('|').map(function(s) { return s.trim(); });
+      if (origParts[0]) data.originalTitle = origParts[0];
+      if (origParts.length >= 3) data.year = origParts[origParts.length - 1];
+      else if (origParts.length === 2) data.year = origParts[1];
+    }
 
-    var yearMatch = html.match(/pmovie__original-title[^>]*>[\s\S]*?(\d{4})/);
-    if (!yearMatch) yearMatch = html.match(/<title[^>]*>.*?(\d{4})/);
-    if (yearMatch) data.year = yearMatch[1];
+    if (!data.year) {
+      var yearMatch = html.match(/<title[^>]*>.*?\((\d{4})/);
+      if (yearMatch) data.year = yearMatch[1];
+    }
 
     var posterMatch = html.match(/ya:ovs:poster"\s*content="([^"]*)"/);
     if (!posterMatch) posterMatch = html.match(/og:image"\s*content="([^"]*)"/);
@@ -694,7 +720,7 @@ async function handleFanfilmPage(pageUrl, corsHeaders) {
     var iframeMatch = html.match(/<iframe[^>]*src="(https?:\/\/[^"]*stravers\.live[^"]*)"[^>]*>/);
     if (iframeMatch) data.iframeUrl = iframeMatch[1];
 
-    if (html.indexOf('4K') !== -1) data.quality = '4K';
+    if (html.indexOf('data-tab="4kplayer"') !== -1) data.quality = '4K';
     else if (html.indexOf('1080') !== -1) data.quality = '1080p';
     else data.quality = 'HD';
 

@@ -165,7 +165,7 @@
   function getPlayersWithRetry(kpId, attempt) {
     attempt = attempt || 0;
     return getPlayers(kpId).then(function(players) {
-      if (players.length === 0 && attempt < 2) {
+      if (players.length === 0 && attempt < 3) {
         console.log('[iframe-cloud] Retry in 1.5s, attempt', attempt + 1);
         return new Promise(function(resolve) {
           setTimeout(function() {
