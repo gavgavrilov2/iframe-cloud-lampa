@@ -35,7 +35,20 @@ export default {
       return await handleProxy(proxyUrl, corsHeaders, request);
     }
 
-    return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY&year=YEAR or ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
+    var vkStream = url.searchParams.get('vkstream');
+    var vkOwnerId = url.searchParams.get('oid');
+    var vkVideoId = url.searchParams.get('vid');
+    var vkQuality = url.searchParams.get('qual') || 'mp4_1080';
+
+    if (vkStream) {
+      return await handleVkStream(vkStream, corsHeaders, request);
+    }
+
+    if (vkOwnerId && vkVideoId) {
+      return await handleVkStreamProxy(vkOwnerId, vkVideoId, vkQuality, corsHeaders, request);
+    }
+
+    return new Response(JSON.stringify({ error: 'Usage: ?vksearch=QUERY&year=YEAR or ?vkstream=URL or ?oid=X&vid=Y&qual=mp4_1080 or ?kpu=URL or ?proxy=URL or ?api=URL&apikey=TOKEN' }), {
       status: 400, headers: corsHeaders
     });
   }
@@ -271,4 +284,98 @@ async function handleVkSearch(query, year, corsHeaders) {
 
 function normalize(s) {
   return (s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/* ---- VK Stream proxy: fetch fresh URL + stream in same invocation (same IP) ---- */
+
+async function handleVkStream(targetUrl, corsHeaders, request) {
+  try {
+    if (targetUrl.startsWith('//')) targetUrl = 'https:' + targetUrl;
+    var target = new URL(targetUrl);
+    var referer = target.origin + '/';
+    var reqHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Referer': referer,
+      'Origin': target.origin
+    };
+    if (request && request.headers) {
+      var range = request.headers.get('Range');
+      if (range) reqHeaders['Range'] = range;
+    }
+    var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
+    var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
+    var ct = resp.headers.get('Content-Type');
+    headers['Content-Type'] = ct || 'video/mp4';
+    var cl = resp.headers.get('Content-Length');
+    if (cl) headers['Content-Length'] = cl;
+    var cr = resp.headers.get('Content-Range');
+    if (cr) headers['Content-Range'] = cr;
+    var ar = resp.headers.get('Accept-Ranges');
+    if (ar) headers['Accept-Ranges'] = ar;
+    return new Response(resp.body, { status: resp.status, headers: headers });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+async function handleVkStreamProxy(ownerId, videoId, quality, corsHeaders, request) {
+  try {
+    var token = await getVkToken();
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'VK token failed' }), { status: 500, headers: corsHeaders });
+    }
+
+    var body = 'owner_id=' + ownerId +
+      '&videos=' + videoId +
+      '&access_token=' + token +
+      '&v=5.264';
+
+    var apiResp = await fetch('https://api.vkvideo.ru/method/video.get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    });
+
+    var json = await apiResp.json();
+    var items = (json.response && json.response.items) || [];
+    var video = items[0];
+
+    if (!video || !video.files) {
+      return new Response(JSON.stringify({ error: 'No video files', video_id: videoId }), { status: 404, headers: corsHeaders });
+    }
+
+    var mp4Url = video.files[quality] || video.files.mp4_720 || video.files.mp4_480 || video.files.mp4_360;
+    if (!mp4Url) {
+      return new Response(JSON.stringify({ error: 'Quality not found', available: Object.keys(video.files) }), { status: 404, headers: corsHeaders });
+    }
+
+    var target = new URL(mp4Url);
+    var reqHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Referer': target.origin + '/',
+      'Origin': target.origin
+    };
+    if (request && request.headers) {
+      var range = request.headers.get('Range');
+      if (range) reqHeaders['Range'] = range;
+    }
+
+    var resp = await fetch(mp4Url, { headers: reqHeaders, redirect: 'follow' });
+    var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
+    var ct = resp.headers.get('Content-Type');
+    headers['Content-Type'] = ct || 'video/mp4';
+    var cl = resp.headers.get('Content-Length');
+    if (cl) headers['Content-Length'] = cl;
+    var cr = resp.headers.get('Content-Range');
+    if (cr) headers['Content-Range'] = cr;
+    var ar = resp.headers.get('Accept-Ranges');
+    if (ar) headers['Accept-Ranges'] = ar;
+    return new Response(resp.body, { status: resp.status, headers: headers });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
 }
