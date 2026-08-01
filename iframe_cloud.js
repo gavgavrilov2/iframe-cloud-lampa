@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.26.0');
+  console.log('[MovieZone] Loading v5.27.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -90,18 +90,20 @@
         var names = [f.nameRu, f.nameOriginal, f.nameEn].filter(Boolean);
         for (var n = 0; n < names.length; n++) {
           if (titleMatch(names[n], title)) {
-            console.log('[iframe-cloud] KPU matched:', f.kinopoiskId, f.nameRu, f.year);
-            return f.kinopoiskId;
+            var fId = f.filmId || f.kinopoiskId || f.id;
+            console.log('[iframe-cloud] KPU matched:', fId, f.nameRu, f.year);
+            return fId;
           }
         }
       }
 
       if (candidates.length) {
         var best = candidates.sort(function(a, b) {
-          return (b.ratingKinopoisk || 0) - (a.ratingKinopoisk || 0);
+          return parseFloat(b.rating || 0) - parseFloat(a.rating || 0);
         })[0];
-        console.log('[iframe-cloud] KPU best guess:', best.kinopoiskId, best.nameRu, best.year);
-        return best.kinopoiskId;
+        var bestId = best.filmId || best.kinopoiskId || best.id;
+        console.log('[iframe-cloud] KPU best guess:', bestId, best.nameRu, best.year);
+        return bestId;
       }
 
       return null;
@@ -455,13 +457,13 @@
     var year = getYear(movie);
     var query = title + (year ? ' ' + year : '');
 
-    Lampa.Noty.show(PLUGIN_NAME + ': VK поиск — ' + title + '...');
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
     fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
       var videos = data.videos || [];
 
       if (!videos.length) {
-        Lampa.Noty.show(PLUGIN_NAME + ': VK — ничего не найдено');
+        Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
         return;
       }
 
@@ -483,7 +485,7 @@
 
         console.log('[iframe-cloud] VK embed qualities:', mp4Qualities.join(', '), 'best:', bestQuality + 'p', 'hls:', !!info.hls);
 
-        Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
+        Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
         var qualityLabel = mp4Qualities.length > 1 ? mp4Qualities[mp4Qualities.length - 1] + 'p-' + mp4Qualities[0] + 'p' : bestQuality + 'p';
 
@@ -516,6 +518,20 @@
           movie: movie,
           label: 'VK'
         };
+
+        try {
+          var cardForHistory = {
+            id: movie.id,
+            title: movie.title || movie.name || '',
+            original_title: movie.original_title || '',
+            poster: movie.poster_path ? 'https://image.tmdb.org/t/p/w300' + movie.poster_path : '',
+            year: getYear(movie),
+            card: movie
+          };
+          Lampa.Favorites.add('history', cardForHistory, PLUGIN_NAME);
+        } catch (e) {
+          console.log('[iframe-cloud] History error:', e.message);
+        }
 
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
@@ -859,8 +875,72 @@
 
   function openPlugin(movie) {
     var id = movie.id;
-    if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID фильма'); return; }
-    searchAndPlayVk(movie);
+    if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID'); return; }
+    var title = movie.title || movie.name || '';
+
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
+
+    getKinopoiskId(movie)
+      .then(function(kpId) {
+        if (!kpId) {
+          searchAndPlayVk(movie);
+          return;
+        }
+
+        console.log('[iframe-cloud] KP ID:', kpId);
+
+        return getPlayersWithRetry(kpId).then(function(players) {
+          players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
+
+          if (!players.length) {
+            searchAndPlayVk(movie);
+            return;
+          }
+
+          var items = players.map(function(p, i) {
+            return {
+              title: p.source + ' — ' + (p.translate || ''),
+              subtitle: (p.quality || ''),
+              _player: p, _index: i
+            };
+          });
+
+          items.push({
+            title: PLUGIN_NAME + ' VK — ' + title,
+            subtitle: '2160p-4K MP4',
+            _vk: true,
+            _movie: movie
+          });
+
+          Lampa.Select.show({
+            title: title,
+            items: items,
+            onSelect: function(item) {
+              if (item._vk) {
+                searchAndPlayVk(item._movie);
+                return;
+              }
+
+              var p = item._player;
+              var pLabel = p.source + ' (' + (p.translate || '') + ')';
+
+              var isOrt = (p.url || '').indexOf('ortified.ws') !== -1;
+
+              if (isOrt) {
+                playOrtified(p.url, pLabel, title, function() {
+                  tryNextPlayer(players, item._index, title);
+                }, movie);
+              } else {
+                showIframePlayer(p.url, pLabel);
+              }
+            }
+          });
+        });
+      })
+      .catch(function(e) {
+        console.log('[iframe-cloud] Error:', e.message);
+        searchAndPlayVk(movie);
+      });
   }
 
   /* ---- Plugin registration ---- */
@@ -909,7 +989,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.26.0', name: PLUGIN_NAME, description: 'VK Video + Collaps + Ortvified', component: 'iframe_cloud',
+      type: 'video', version: '5.27.0', name: PLUGIN_NAME, description: 'VK Video', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

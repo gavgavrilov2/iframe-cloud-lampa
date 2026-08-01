@@ -13,6 +13,7 @@ export default {
 
     const url = new URL(request.url);
     const kpuUrl = url.searchParams.get('kpu');
+    const kpuDebug = url.searchParams.get('kpu_debug');
     const proxyUrl = url.searchParams.get('proxy');
     const apiKey = url.searchParams.get('apikey');
     const apiUrl = url.searchParams.get('api');
@@ -25,6 +26,10 @@ export default {
 
     if (kpuUrl) {
       return await handleKpuProxy(kpuUrl, corsHeaders);
+    }
+
+    if (kpuDebug) {
+      return await handleKpuDebug(kpuDebug, corsHeaders);
     }
 
     if (apiUrl) {
@@ -74,6 +79,26 @@ async function handleKpuProxy(targetUrl, corsHeaders) {
     var data = await resp.text();
     return new Response(data, {
       status: resp.status,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+async function handleKpuDebug(query, corsHeaders) {
+  try {
+    var resp = await fetch('https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword=' + encodeURIComponent(query) + '&page=1', {
+      headers: { 'X-API-KEY': KPU_TOKEN, 'Accept': 'application/json' }
+    });
+    var data = await resp.json();
+    var films = data.films || [];
+    var first = films[0] || null;
+    return new Response(JSON.stringify({
+      total: films.length,
+      firstKeys: first ? Object.keys(first) : [],
+      firstFilm: first
+    }, null, 2), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
     });
   } catch (e) {
