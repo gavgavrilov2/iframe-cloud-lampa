@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.22.1');
+  console.log('[iframe-cloud] Loading v5.23.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -486,7 +486,7 @@
         for (var i = 0; i < qKeys.length; i++) {
           var qNum = parseInt(qKeys[i]);
           var vkQual = qualityNames[qNum] || 'mp4_' + qNum;
-          play.quality[qKeys[i]] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&qual=' + vkQual;
+          play.quality[qKeys[i]] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&qual=' + vkQual + '&q=' + encodeURIComponent(title) + '&year=' + (year || '');
         }
       }
 
@@ -927,7 +927,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.22.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.23.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
 
@@ -967,7 +967,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.22.1', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud + VK Video', component: 'iframe_cloud',
+      type: 'video', version: '5.23.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud + VK Video', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
