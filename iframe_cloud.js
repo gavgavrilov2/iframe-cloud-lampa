@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.29.1');
+  console.log('[MovieZone] Loading v5.31.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -641,6 +641,116 @@
     });
   }
 
+  /* ---- Kinogo/cinemar.cc: search → multi-audio m3u8 → native player ---- */
+
+  function searchAndPlayKinogo(movie) {
+    var title = movie.title || movie.original_title || movie.name || '';
+    var year = getYear(movie);
+
+    Lampa.Noty.show(PLUGIN_NAME + ': поиск ' + title + '...');
+
+    fetchJson(WORKER_URL + '/?kinogo_search=' + encodeURIComponent(title)).then(function(data) {
+      var results = data.results || [];
+
+      if (!results.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ничего не найдено');
+        return;
+      }
+
+      var best = null;
+      for (var i = 0; i < results.length; i++) {
+        if (year && results[i].year && Math.abs(parseInt(results[i].year) - parseInt(year)) <= 1) {
+          best = results[i];
+          break;
+        }
+      }
+      if (!best) best = results[0];
+
+      console.log('[iframe-cloud] Kinogo found:', best.title, best.year, best.url);
+
+      Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + (best.year || '?') + ')');
+
+      fetchJson(WORKER_URL + '/?kinogo_page=' + encodeURIComponent(best.url)).then(function(pageData) {
+        if (pageData.embedUrl) {
+          var embedUrl = pageData.embedUrl;
+          if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
+          playKinogoEmbed(embedUrl, best, movie);
+        } else {
+          Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — плеер не найден');
+        }
+      }).catch(function(e) {
+        console.log('[iframe-cloud] Kinogo page error:', e.message);
+        Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
+      });
+
+    }).catch(function(e) {
+      console.log('[iframe-cloud] Kinogo search error:', e.message);
+      Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
+    });
+  }
+
+  function playKinogoEmbed(embedUrl, result, movie) {
+    var multiUrl = WORKER_URL + '/?kinogo_multi=' + encodeURIComponent(embedUrl);
+
+    console.log('[iframe-cloud] Kinogo multi-audio URL:', multiUrl.substring(0, 120));
+
+    var play = {
+      url: multiUrl,
+      title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
+      subtitles: []
+    };
+
+    var hash = getTimelineHash(movie, 'Kinogo');
+    var timeline = Lampa.Timeline.view(hash);
+    play.timeline = timeline;
+
+    var beholdHash = getBeholdHash(movie, 'Kinogo');
+    markViewed(beholdHash);
+
+    window._iframe_cloud_current = {
+      timeline: timeline,
+      beholdHash: beholdHash,
+      movie: movie,
+      label: 'Kinogo'
+    };
+
+    addToHistory(movie);
+
+    Lampa.Player.play(play);
+    Lampa.Player.playlist([play]);
+
+    setTimeout(function() {
+      var el = document.querySelector('video');
+      if (!el) return;
+
+      var lastSave = 0;
+      var savePos = function() {
+        var now = Date.now();
+        if (now - lastSave < 3000) return;
+        if (!el.duration || el.duration < 10) return;
+        lastSave = now;
+        timeline.time = Math.round(el.currentTime);
+        timeline.duration = Math.round(el.duration);
+        timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+        Lampa.Timeline.update(timeline);
+      };
+
+      el.addEventListener('timeupdate', savePos);
+      el.addEventListener('pause', savePos);
+      el.addEventListener('ended', savePos);
+
+      var doRestore = function() {
+        if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+          el.currentTime = timeline.time;
+          Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+        }
+      };
+
+      if (el.readyState >= 1) doRestore();
+      else el.addEventListener('loadedmetadata', doRestore);
+    }, 1500);
+  }
+
   /* ---- iframe fallback (for non-ortified players or failures) ---- */
 
   function showIframePlayer(url, label, onClose) {
@@ -968,11 +1078,7 @@
     getKinopoiskId(movie)
       .then(function(kpId) {
         if (!kpId) {
-          if (tv) {
-            Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
-            return;
-          }
-          searchAndPlayVk(movie);
+          searchAndPlayKinogo(movie);
           return;
         }
 
@@ -982,34 +1088,32 @@
           players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
 
           if (!players.length) {
-            if (tv) {
-              Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
-              return;
-            }
-            searchAndPlayVk(movie);
+            searchAndPlayKinogo(movie);
             return;
           }
 
-          var items = players.map(function(p, i) {
+          var items = [];
+
+          items.push({
+            title: PLUGIN_NAME + ' Kinogo — ' + title,
+            subtitle: '1080p HLS \u043e\u0437\u0432\u0443\u0447\u043a\u0438',
+            _kinogo: true,
+            _movie: movie
+          });
+
+          items = items.concat(players.map(function(p, i) {
             return {
               title: p.source + ' — ' + (p.translate || ''),
               subtitle: (p.quality || ''),
               _player: p, _index: i
             };
-          });
+          }));
 
           if (!tv) {
             items.push({
               title: PLUGIN_NAME + ' VK — ' + title,
               subtitle: '2160p-4K MP4',
               _vk: true,
-              _movie: movie
-            });
-
-            items.push({
-              title: PLUGIN_NAME + ' FanFilm — ' + title,
-              subtitle: '4K',
-              _fanfilm: true,
               _movie: movie
             });
           }
@@ -1025,6 +1129,11 @@
             title: title,
             items: items,
             onSelect: function(item) {
+              if (item._kinogo) {
+                searchAndPlayKinogo(item._movie);
+                return;
+              }
+
               if (item._vk) {
                 searchAndPlayVk(item._movie);
                 return;
@@ -1060,11 +1169,7 @@
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
-        if (!isTvSeries(movie)) {
-          searchAndPlayVk(movie);
-        } else {
-          Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
-        }
+        searchAndPlayKinogo(movie);
       });
   }
 

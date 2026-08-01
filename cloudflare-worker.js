@@ -12,6 +12,7 @@ export default {
     }
 
     const url = new URL(request.url);
+
     const kpuUrl = url.searchParams.get('kpu');
     const kpuDebug = url.searchParams.get('kpu_debug');
     const proxyUrl = url.searchParams.get('proxy');
@@ -21,6 +22,36 @@ export default {
     const vkYear = url.searchParams.get('year');
     const fanfilmSearch = url.searchParams.get('fanfilm_search');
     const fanfilmPage = url.searchParams.get('fanfilm_page');
+    const straversUrl = url.searchParams.get('stravers');
+    const kinogoSearch = url.searchParams.get('kinogo_search');
+    const kinogoEmbed = url.searchParams.get('kinogo_embed');
+    const kinogoMulti = url.searchParams.get('kinogo_multi');
+    const kinogoStream = url.searchParams.get('kinogo_stream');
+    const kinogoPage = url.searchParams.get('kinogo_page');
+
+    if (kinogoMulti) {
+      return await handleKinogoMulti(kinogoMulti.replace(/ /g, '+'), corsHeaders, request);
+    }
+
+    if (kinogoStream) {
+      return await handleKinogoStream(kinogoStream, corsHeaders, request);
+    }
+
+    if (kinogoPage) {
+      return await handleKinogoPage(kinogoPage, corsHeaders);
+    }
+
+    if (kinogoEmbed) {
+      return await handleKinogoEmbed(kinogoEmbed.replace(/ /g, '+'), corsHeaders);
+    }
+
+    if (kinogoSearch) {
+      return await handleKinogoSearch(kinogoSearch, corsHeaders);
+    }
+
+    if (straversUrl) {
+      return await handleStraversProxy(straversUrl, corsHeaders);
+    }
 
     if (fanfilmSearch) {
       return await handleFanfilmSearch(fanfilmSearch, corsHeaders);
@@ -73,26 +104,42 @@ export default {
       status: 400, headers: corsHeaders
     });
   }
-};
+}
 
-const KPU_TOKEN = '7edcf64b-b9aa-4f8b-8b5c-ef59bfe69a2c';
-
-async function handleKpuProxy(targetUrl, corsHeaders) {
+async function handleStraversProxy(targetUrl, corsHeaders) {
   try {
+    if (targetUrl.startsWith('//')) targetUrl = 'https:' + targetUrl;
     var resp = await fetch(targetUrl, {
       headers: {
-        'X-API-KEY': KPU_TOKEN,
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
+        'Referer': 'https://v16.fanfilm4k.media/',
+        'Origin': 'https://v16.fanfilm4k.media'
       },
       redirect: 'follow'
     });
-    var data = await resp.text();
-    return new Response(data, {
-      status: resp.status,
-      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    var html = await resp.text();
+    var base = new URL(targetUrl);
+    var origin = base.origin;
+    html = html.replace(/src="\.\//g, 'src="' + origin + '/');
+    html = html.replace(/src="\/\//g, 'src="https://');
+    html = html.replace(/href="\.\//g, 'href="' + origin + '/');
+    html = html.replace(/href="\/\//g, 'href="https://');
+    html = html.replace(/from "\.\/js\//g, 'from "' + origin + '/js/');
+    html = html.replace(/fetch\("\//g, 'fetch("' + origin + '/');
+    return new Response(html, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      }
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500, headers: corsHeaders
+    });
   }
 }
 
@@ -742,4 +789,387 @@ async function handleFanfilmPage(pageUrl, corsHeaders) {
       status: 200, headers: corsHeaders
     });
   }
+}
+
+/* ======================== KINOGO / CINEMAR ======================== */
+
+var KINOGO_BASE = 'https://uakinogo.io';
+var KINOGO_VERCEL_PROXY = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
+
+async function fetchViaVercel(targetUrl, referer) {
+  var proxyUrl = KINOGO_VERCEL_PROXY + '?url=' + encodeURIComponent(targetUrl);
+  if (referer) proxyUrl += '&referer=' + encodeURIComponent(referer);
+  var resp = await fetch(proxyUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+    }
+  });
+  return resp;
+}
+
+async function handleKinogoSearch(query, corsHeaders) {
+  try {
+    var searchUrl = KINOGO_BASE + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(query);
+    var resp = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9'
+      }
+    });
+    var html = await resp.text();
+
+    var results = [];
+    var re = /<article[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/a><\/h2>[\s\S]*?<img[^>]*data-src="([^"]*)"/g;
+    var m;
+    while ((m = re.exec(html)) !== null) {
+      var pageUrl = m[1].trim();
+      var imgTitle = m[2].trim();
+      var h2Text = m[3].replace(/<[^>]+>/g, '').trim();
+      var poster = m[4].trim();
+      if (poster.indexOf('http') !== 0) poster = KINOGO_BASE + poster;
+
+      var yearMatch = h2Text.match(/\((\d{4})\s*(?:-\s*(\d{4}))?\)/);
+      var year = yearMatch ? yearMatch[1] : '';
+      var title = h2Text.replace(/\s*\(\d{4}(?:\s*-\s*\d{4})?\)\s*/g, '').trim();
+      if (!title) title = imgTitle;
+
+      var type = pageUrl.indexOf('/filmy/') !== -1 ? 'film' : 'serial';
+
+      results.push({ title: title, year: year, url: pageUrl, poster: poster, type: type });
+    }
+
+    return new Response(JSON.stringify({ results: results.slice(0, 20) }), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, results: [] }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
+async function handleKinogoPage(pageUrl, corsHeaders) {
+  try {
+    var resp = await fetch(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+        'Referer': KINOGO_BASE + '/'
+      }
+    });
+    var html = await resp.text();
+
+    var embedMatch = html.match(/data-src="(https?:\/\/cinemar\.cc\/embed\/[^"]+)"/);
+    if (!embedMatch) embedMatch = html.match(/data-src="(\/\/cinemar\.cc\/embed\/[^"]+)"/);
+    if (!embedMatch) embedMatch = html.match(/src="(https?:\/\/cinemar\.cc\/embed\/[^"]+)"/);
+
+    var titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+    var title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/\s*\(\d{4}\)\s*/, '').trim() : '';
+    var yearMatch = html.match(/Год выпуска[^<]*<a[^>]*>(\d{4})/);
+    var year = yearMatch ? yearMatch[1] : '';
+
+    return new Response(JSON.stringify({
+      embedUrl: embedMatch ? embedMatch[1] : null,
+      title: title,
+      year: year,
+      url: pageUrl
+    }), { status: 200, headers: corsHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, embedUrl: null }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
+async function handleKinogoEmbed(embedUrl, corsHeaders) {
+  try {
+    if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
+
+    var resp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+        'Referer': KINOGO_BASE + '/'
+      }
+    });
+    var html = await resp.text();
+
+    var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    if (!fileMatch) {
+      resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
+      html = await resp.text();
+      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    }
+    if (!fileMatch) {
+      return new Response(JSON.stringify({ error: 'No file found in embed', playlist: [] }), {
+        status: 200, headers: corsHeaders
+      });
+    }
+
+    var encoded = fileMatch[1];
+    var playlist = decodePlayerjs(encoded);
+
+    return new Response(JSON.stringify({ playlist: playlist }), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, playlist: [] }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
+function decodePlayerjs(encoded) {
+  if (encoded.indexOf('#2') !== 0) return [];
+
+  var data = encoded.substring(2);
+  var separatorCode = parseInt(data.substring(0, 2));
+  var separator = String.fromCharCode(separatorCode);
+  var parts = data.substring(2).split(separator);
+  var ml = 32;
+
+  var sliced = parts.map(function(part) {
+    var t = parseInt(part.slice(-1));
+    if (part.length > ml) {
+      return part.substring(2 * t, 2 * t + part.length - 3 * t - 1) + part.substring(0, t);
+    }
+    return part;
+  });
+
+  var val = sliced.join('');
+  var padding = val.length % 4;
+  if (padding) val += '='.repeat(4 - padding);
+
+  try {
+    var decoded = atob(val);
+    return JSON.parse(decoded);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function handleKinogoMulti(embedUrl, corsHeaders, request) {
+  try {
+    if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
+
+    var embedResp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+        'Referer': KINOGO_BASE + '/'
+      }
+    });
+    var html = await embedResp.text();
+
+    var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    if (!fileMatch) {
+      embedResp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
+      html = await embedResp.text();
+      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    }
+    if (!fileMatch) {
+      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
+      });
+    }
+
+    var playlist = decodePlayerjs(fileMatch[1]);
+    if (!playlist || !playlist.length) {
+      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
+      });
+    }
+
+    var voices = [];
+    for (var i = 0; i < playlist.length; i++) {
+      var item = playlist[i];
+      if (!item.file) continue;
+      var voiceName = item.title || 'Voice ' + (i + 1);
+      voiceName = voiceName.replace(/,/g, ' ');
+      var voiceUrl = item.file;
+      if (voiceUrl.indexOf('http') !== 0) voiceUrl = 'https:' + voiceUrl;
+
+      var streamParam = encodeURIComponent(voiceUrl);
+      var workerBase = new URL(request.url).origin;
+      var proxyUrl = workerBase + '/?kinogo_stream=' + streamParam;
+
+      voices.push({ name: voiceName, url: voiceUrl, proxyUrl: proxyUrl, subtitles: item.subtitle || '' });
+    }
+
+    if (!voices.length) {
+      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
+      });
+    }
+
+    var firstVoice = voices[0];
+    var variantResp = await fetch(firstVoice.url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Referer': 'https://cinemar.cc/',
+        'Origin': 'https://cinemar.cc'
+      }
+    });
+    var variantM3u8 = await variantResp.text();
+    if (variantM3u8.indexOf('#EXT-X-STREAM-INF') === -1) {
+      variantResp = await fetchViaVercel(firstVoice.url, 'https://cinemar.cc/');
+      variantM3u8 = await variantResp.text();
+    }
+    var variants = parseVariants(variantM3u8, firstVoice.proxyUrl);
+
+    var lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+
+    for (var v = 0; v < voices.length; v++) {
+      var voice = voices[v];
+      var defaultAttr = v === 0 ? ',DEFAULT=YES' : '';
+      var autoSelect = v === 0 ? ',AUTOSELECT=YES' : '';
+      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + voice.proxyUrl + '",NAME="' + voice.name + '"');
+    }
+
+    if (variants.length) {
+      for (var q = 0; q < variants.length; q++) {
+        var variant = variants[q];
+        var audioAttr = ',AUDIO="audio"';
+        lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + audioAttr);
+        lines.push(variant.proxyUrl);
+      }
+    } else {
+      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=5600000,RESOLUTION=1920x1080,AUDIO="audio"');
+      lines.push(firstVoice.proxyUrl);
+    }
+
+    return new Response(lines.join('\n'), {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Cache-Control': 'no-cache'
+      }
+    });
+  } catch (e) {
+    return new Response('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n', {
+      status: 200,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
+    });
+  }
+}
+
+function parseVariants(m3u8, baseProxyUrl) {
+  var lines = m3u8.split('\n');
+  var variants = [];
+  var bandwidthMap = { '240': 406000, '360': 696000, '480': 1328000, '720': 2892000, '1080': 5592000 };
+  var resMap = { '240': '426x240', '360': '640x360', '480': '854x480', '720': '1280x720', '1080': '1920x1080' };
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
+      var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+      if (nextLine && nextLine.indexOf('#') !== 0) {
+        var bwMatch = line.match(/BANDWIDTH=(\d+)/);
+        var bw = bwMatch ? parseInt(bwMatch[1]) : 1000000;
+        var resMatch = line.match(/RESOLUTION=(\d+x\d+)/);
+        var res = resMatch ? resMatch[1] : '1280x720';
+
+        var quality = nextLine.match(/\.(\d+)\.mp4/);
+        var qNum = quality ? quality[1] : '';
+
+        var fullUrl = nextLine;
+        if (nextLine.indexOf('http') !== 0) {
+          var baseParts = baseProxyUrl.split('=');
+          var originalBase = decodeURIComponent(baseParts[1] || '');
+          var dir = originalBase.replace(/\/[^\/]*$/, '/');
+          fullUrl = baseParts[0] + '=' + encodeURIComponent(dir + nextLine);
+        }
+
+        variants.push({
+          bandwidth: bw,
+          resolution: res,
+          proxyUrl: fullUrl,
+          quality: qNum
+        });
+      }
+    }
+  }
+
+  variants.sort(function(a, b) {
+    var aQ = parseInt(a.quality) || 0;
+    var bQ = parseInt(b.quality) || 0;
+    return bQ - aQ;
+  });
+
+  return variants;
+}
+
+async function handleKinogoStream(streamUrl, corsHeaders, request) {
+  try {
+    var decodedUrl = decodeURIComponent(streamUrl);
+    if (decodedUrl.indexOf('http') !== 0) decodedUrl = 'https:' + decodedUrl;
+
+    var reqHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Referer': 'https://cinemar.cc/',
+      'Origin': 'https://cinemar.cc'
+    };
+    if (request && request.headers) {
+      var range = request.headers.get('Range');
+      if (range) reqHeaders['Range'] = range;
+    }
+
+    var resp = await fetch(decodedUrl, { headers: reqHeaders, redirect: 'follow' });
+    var respHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Range'
+    };
+
+    var ct = resp.headers.get('Content-Type');
+    var isM3u8 = ct && ct.indexOf('mpegurl') !== -1;
+    if (!isM3u8 && decodedUrl.indexOf('.m3u8') !== -1) isM3u8 = true;
+    respHeaders['Content-Type'] = ct || 'video/mp4';
+
+    var cl = resp.headers.get('Content-Length');
+    if (cl) respHeaders['Content-Length'] = cl;
+    var cr = resp.headers.get('Content-Range');
+    if (cr) respHeaders['Content-Range'] = cr;
+    var ar = resp.headers.get('Accept-Ranges');
+    if (ar) respHeaders['Accept-Ranges'] = ar;
+
+    if (isM3u8) {
+      var body = await resp.text();
+      var rewritten = rewriteKinogoUrls(body, decodedUrl);
+      return new Response(rewritten, { status: resp.status, headers: respHeaders });
+    }
+
+    return new Response(resp.body, { status: resp.status, headers: respHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+function rewriteKinogoUrls(m3u8, baseUrl) {
+  var lines = m3u8.split('\n');
+  var baseDir = baseUrl.replace(/\/[^\/]*$/, '/');
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line || line.startsWith('#') || line.indexOf('/?kinogo_stream=') === 0 || line.indexOf('/?proxy=') === 0) continue;
+
+    var fullUrl = line;
+    if (line.indexOf('http') !== 0) {
+      fullUrl = baseDir + line;
+    }
+
+    lines[i] = '/?kinogo_stream=' + encodeURIComponent(fullUrl);
+  }
+
+  return lines.join('\n');
 }
