@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.25.0');
+  console.log('[iframe-cloud] Loading v5.26.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -116,11 +116,17 @@
       console.log('[iframe-cloud] Trying IMDb:', imdbId);
       return fetchJsonViaProxy(KP_API_BASE + '?externalId.imdb=' + imdbId + '&selectFields=id,name&token=' + KP_API_TOKEN)
         .then(function(d) {
-          if (!d.docs || !d.docs.length) return null;
-          var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
-          return best && best.id || null;
+          if (d.docs && d.docs.length) {
+            var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
+            return best && best.id || null;
+          }
+          console.log('[iframe-cloud] IMDb not found in KP, trying name search');
+          return searchKinopoiskByName(movie);
         })
-        .catch(function() { return null; });
+        .catch(function() {
+          console.log('[iframe-cloud] IMDb lookup failed, trying name search');
+          return searchKinopoiskByName(movie);
+        });
     }
 
     return searchKinopoiskByName(movie).then(function(kpId) {
@@ -475,7 +481,7 @@
         var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
         var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
 
-        console.log('[iframe-cloud] VK embed qualities:', mp4Qualities.join(', '), 'best:', bestQuality + 'p');
+        console.log('[iframe-cloud] VK embed qualities:', mp4Qualities.join(', '), 'best:', bestQuality + 'p', 'hls:', !!info.hls);
 
         Lampa.Noty.show(PLUGIN_NAME + ': VK — ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
@@ -485,10 +491,13 @@
           subtitles: []
         };
 
-        if (mp4Qualities.length > 1) {
+        if (mp4Qualities.length > 1 || info.hls) {
           play.quality = {};
           for (var i = 0; i < mp4Qualities.length; i++) {
             play.quality[mp4Qualities[i]] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
+          }
+          if (info.hls) {
+            play.quality['HLS'] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&hls=1';
           }
         }
 

@@ -40,9 +40,14 @@ export default {
     var vkVideoId = url.searchParams.get('vid');
     var vkQuality = url.searchParams.get('qual') || 'mp4_1080';
     var vkQuery = url.searchParams.get('q');
+    var vkHls = url.searchParams.get('hls');
 
     if (vkStream) {
       return await handleVkStream(vkStream, corsHeaders, request);
+    }
+
+    if (vkOwnerId && vkVideoId && vkHls === '1') {
+      return await handleVkHlsProxy(vkOwnerId, vkVideoId, corsHeaders);
     }
 
     if (vkOwnerId && vkVideoId) {
@@ -450,6 +455,80 @@ async function handleVkStreamProxy(ownerId, videoId, quality, query, year, corsH
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+/* ---- VK HLS proxy: fetch embed page → extract HLS → proxy m3u8 with rewritten URLs ---- */
+
+async function getVkHlsUrl(ownerId, videoId) {
+  var embedUrl = 'https://vk.com/video_ext.php?oid=' + ownerId + '&id=' + videoId;
+  var embedResp = await fetch(embedUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Referer': 'https://vk.com/'
+    }
+  });
+  var html = await embedResp.text();
+
+  var hlsRe = new RegExp('"hls"\\s*:\\s*"(https?[^"]+)"');
+  var hlsMatch = html.match(hlsRe);
+  if (hlsMatch && hlsMatch[1]) {
+    return hlsMatch[1].replace(/\\\//g, '/');
+  }
+  return null;
+}
+
+function rewriteM3u8Urls(m3u8, baseUrl) {
+  var lines = m3u8.split('\n');
+  var baseOrigin = '';
+  try { baseOrigin = new URL(baseUrl).origin; } catch(e) {}
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line || line.startsWith('#')) continue;
+
+    var fullUrl = line;
+    if (line.indexOf('http') !== 0) {
+      fullUrl = baseUrl.replace(/\/[^\/]*$/, '/') + line;
+    }
+
+    lines[i] = '/?proxy=' + encodeURIComponent(fullUrl);
+  }
+
+  return lines.join('\n');
+}
+
+async function handleVkHlsProxy(ownerId, videoId, corsHeaders) {
+  try {
+    var hlsUrl = await getVkHlsUrl(ownerId, videoId);
+    if (!hlsUrl) {
+      return new Response(JSON.stringify({ error: 'No HLS URL found' }), { status: 404, headers: corsHeaders });
+    }
+
+    var resp = await fetch(hlsUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Referer': 'https://vk.com/',
+        'Origin': 'https://vk.com'
+      }
+    });
+
+    var m3u8 = await resp.text();
+    var rewritten = rewriteM3u8Urls(m3u8, hlsUrl);
+
+    return new Response(rewritten, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Cache-Control': 'no-cache'
+      }
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
