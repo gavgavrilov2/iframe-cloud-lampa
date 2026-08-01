@@ -114,7 +114,7 @@
     var imdbId = movie.imdb_id || (movie.external_ids && movie.external_ids.imdb_id);
     if (imdbId) {
       console.log('[iframe-cloud] Trying IMDb:', imdbId);
-      return fetchJsonViaProxy(KP_API_BASE + '?externalId.imdb=' + imdbId + '&selectFields=id,name')
+      return fetchJsonViaProxy(KP_API_BASE + '?externalId.imdb=' + imdbId + '&selectFields=id,name&token=' + KP_API_TOKEN)
         .then(function(d) {
           if (!d.docs || !d.docs.length) return null;
           var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
@@ -131,7 +131,7 @@
       if (!query) return null;
 
       console.log('[iframe-cloud] Fallback to TMDB:', tmdbId);
-      return fetchJsonViaProxy(KP_API_BASE + '?' + query + '&selectFields=id,name')
+      return fetchJsonViaProxy(KP_API_BASE + '?' + query + '&selectFields=id,name&token=' + KP_API_TOKEN)
         .then(function(d) {
           if (!d.docs || !d.docs.length) return null;
           var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
