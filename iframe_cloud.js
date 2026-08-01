@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.28.0');
+  console.log('[MovieZone] Loading v5.29.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -447,6 +447,79 @@
           showEpisodeSelector([item._season], title, current, movie);
         }
       }
+    });
+  }
+
+  /* ---- FanFilm4K search ---- */
+
+  function searchAndPlayFanfilm(movie) {
+    var title = movie.title || movie.original_title || movie.name || '';
+    var year = getYear(movie);
+    var query = title + (year ? ' ' + year : '');
+
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
+
+    fetchJson(WORKER_URL + '/?fanfilm_search=' + encodeURIComponent(query)).then(function(data) {
+      var results = data.results || [];
+
+      if (!results.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+        return;
+      }
+
+      var best = results[0];
+
+      if (year) {
+        for (var i = 0; i < results.length; i++) {
+          if (results[i].url.indexOf(String(year)) !== -1) {
+            best = results[i];
+            break;
+          }
+        }
+      }
+
+      console.log('[iframe-cloud] FanFilm found:', best.title, best.url);
+
+      fetchJson(WORKER_URL + '/?fanfilm_page=' + encodeURIComponent(best.url)).then(function(pageData) {
+        console.log('[iframe-cloud] FanFilm page:', pageData.title, pageData.quality, pageData.iframeUrl);
+
+        if (pageData.iframeUrl) {
+          Lampa.Noty.show(PLUGIN_NAME + ': ' + (pageData.title || title) + ' (' + (pageData.quality || '?') + ')');
+
+          addToHistory(movie);
+
+          var play = {
+            url: pageData.iframeUrl,
+            title: PLUGIN_NAME + ' FanFilm ' + (pageData.quality || '') + ' — ' + (pageData.title || title),
+            subtitles: []
+          };
+
+          var hash = getTimelineHash(movie, 'FanFilm');
+          var timeline = Lampa.Timeline.view(hash);
+          play.timeline = timeline;
+
+          var beholdHash = getBeholdHash(movie, 'FanFilm');
+          markViewed(beholdHash);
+
+          window._iframe_cloud_current = {
+            timeline: timeline,
+            beholdHash: beholdHash,
+            movie: movie,
+            label: 'FanFilm'
+          };
+
+          showIframePlayer(pageData.iframeUrl, 'FanFilm ' + (pageData.quality || ''), function() {});
+        } else {
+          Lampa.Noty.show(PLUGIN_NAME + ': iframe не найден');
+        }
+      }).catch(function(e) {
+        console.log('[iframe-cloud] FanFilm page error:', e.message);
+        Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки страницы');
+      });
+
+    }).catch(function(e) {
+      console.log('[iframe-cloud] FanFilm search error:', e.message);
+      Lampa.Noty.show(PLUGIN_NAME + ': ошибка поиска');
     });
   }
 
@@ -930,6 +1003,13 @@
               _vk: true,
               _movie: movie
             });
+
+            items.push({
+              title: PLUGIN_NAME + ' FanFilm — ' + title,
+              subtitle: '4K',
+              _fanfilm: true,
+              _movie: movie
+            });
           }
 
           items.push({
@@ -945,6 +1025,11 @@
             onSelect: function(item) {
               if (item._vk) {
                 searchAndPlayVk(item._movie);
+                return;
+              }
+
+              if (item._fanfilm) {
+                searchAndPlayFanfilm(item._movie);
                 return;
               }
 
