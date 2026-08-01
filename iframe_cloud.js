@@ -8,7 +8,7 @@
   var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
-  var KP_API_TOKEN = 'MN8ESAR-17QMKME-NGMZKRA-RV0SSK1';
+  var KP_API_TOKEN = 'WYVHF8M-XKBM92B-JD2ZQ8R-EPZ37AQ';
   var IFRAME_CLOUD_API = 'https://iframe.cloud/lampac-api.php';
   var KPU_API = 'https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword';
 
