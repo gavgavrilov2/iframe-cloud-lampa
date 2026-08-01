@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.20.0');
+  console.log('[iframe-cloud] Loading v5.20.1');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -188,15 +188,31 @@
     return Lampa.Utils.hash(base);
   }
 
-  function updateTimeline(timeline, video) {
-    if (!timeline || !video) return;
-    var time = video.currentTime || 0;
-    var duration = video.duration || 0;
-    var percent = duration > 0 ? Math.min(100, Math.round((time / duration) * 100)) : 0;
-    timeline.time = Math.round(time);
-    timeline.duration = Math.round(duration);
-    timeline.percent = percent;
+  function getBeholdHash(movie, label) {
+    var base = movie.original_title || movie.title || movie.name || '';
+    return Lampa.Utils.hash((label || '') + base + '_viewed');
+  }
+
+  function getViewed() {
+    return Lampa.Storage.cache('online_view', 5000, []);
+  }
+
+  function markViewed(hash) {
+    var viewed = getViewed();
+    if (viewed.indexOf(hash) === -1) {
+      viewed.push(hash);
+      Lampa.Storage.set('online_view', viewed);
+    }
+  }
+
+  function clearTimeline(movie, label) {
+    var hash = getTimelineHash(movie, label);
+    var timeline = Lampa.Timeline.view(hash);
+    timeline.percent = 0;
+    timeline.time = 0;
+    timeline.duration = 0;
     Lampa.Timeline.update(timeline);
+    Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u0440\u043e\u0433\u0440\u0435\u0441\u0441 \u0441\u0431\u0440\u043e\u0448\u0435\u043d');
   }
 
   /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
@@ -213,17 +229,51 @@
       var hash = getTimelineHash(movie, label);
       var timeline = Lampa.Timeline.view(hash);
       video.timeline = timeline;
+
+      var beholdHash = getBeholdHash(movie, label);
+      markViewed(beholdHash);
+
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: label
+      };
+
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
+
       setTimeout(function() {
         var el = document.querySelector('video');
         if (!el) return;
-        var handler = function() { updateTimeline(timeline, el); };
-        el.addEventListener('timeupdate', handler);
-        el.addEventListener('loadedmetadata', handler);
-        el.addEventListener('pause', handler);
-        el.addEventListener('ended', handler);
-      }, 1000);
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          timeline.time = Math.round(el.currentTime);
+          timeline.duration = Math.round(el.duration);
+          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(timeline);
+          console.log('[iframe-cloud] Timeline saved:', timeline.time + 's / ' + timeline.duration + 's (' + timeline.percent + '%)');
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+            el.currentTime = timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
     } else {
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
@@ -326,13 +376,29 @@
         var hls = ep.hls || '';
         var dur = ep.duration ? Math.round(ep.duration / 60) + ' \u043c\u0438\u043d' : '';
         var isCur = current && current.season == sNum && current.episode == eNum;
+        var epLabel = 'S' + sNum + 'E' + eNum;
 
         if (hls) {
+          var subtitle = dur;
+          try {
+            var eHash = getTimelineHash(movie, epLabel);
+            var eTl = Lampa.Timeline.view(eHash);
+            if (eTl && eTl.time > 0 && eTl.duration > 0) {
+              var mins = Math.floor(eTl.time / 60);
+              var secs = String(Math.floor(eTl.time % 60)).padStart(2, '0');
+              subtitle = (subtitle ? subtitle + ' | ' : '') + '\u25b6 ' + mins + ':' + secs + ' / ' + Math.round(eTl.duration / 60) + ' \u043c\u0438\u043d';
+            }
+            var bHash = getBeholdHash(movie, epLabel);
+            if (getViewed().indexOf(bHash) !== -1) {
+              subtitle = '\u2714 ' + subtitle;
+            }
+          } catch (e) {}
+
           items.push({
-            title: (isCur ? '\u25b6 ' : '') + 'S' + sNum + 'E' + eNum,
-            subtitle: dur,
+            title: (isCur ? '\u25b6 ' : '') + epLabel,
+            subtitle: subtitle,
             _hls: hls,
-            _label: 'S' + sNum + 'E' + eNum
+            _label: epLabel
           });
         }
       }
@@ -343,7 +409,7 @@
     Lampa.Select.show({
       title: PLUGIN_NAME + ' \u2014 ' + title,
       items: items,
-      onSelect: function(item) { playHlsProxied(item._hls, item._label + ' ' + title, movie); }
+      onSelect: function(item) { playHlsProxied(item._hls, item._label + ' ' + title, movie, item._label); }
     });
   }
 
@@ -366,8 +432,9 @@
       items: items,
       onSelect: function(item) {
         var eps = item._season.episodes || [];
+        var epLabel = 'S' + item._sNum + 'E1';
         if (eps.length === 1 && eps[0].hls) {
-          playHlsProxied(eps[0].hls, 'S' + item._sNum + 'E1 ' + title, movie);
+          playHlsProxied(eps[0].hls, epLabel + ' ' + title, movie, epLabel);
         } else {
           showEpisodeSelector([item._season], title, current, movie);
         }
@@ -746,9 +813,23 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var container = $('<div class="iframe-cloud-card" style="margin-top:0.5em;"></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.1"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
-    render.after(btn);
+    container.append(btn);
+
+    try {
+      var hash = getTimelineHash(movie);
+      var timeline = Lampa.Timeline.view(hash);
+      if (timeline && timeline.time > 0) {
+        var tl = Lampa.Timeline.render(timeline);
+        if (tl) container.append(tl);
+      }
+    } catch (e) {
+      console.log('[iframe-cloud] Timeline render error:', e.message);
+    }
+
+    render.after(container);
   }
 
   var buttonAdded = false;
@@ -775,7 +856,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.20.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.20.1', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
