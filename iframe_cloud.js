@@ -4,7 +4,7 @@
   console.log('[MovieZone] Loading v5.26.0');
 
   var PLUGIN_NAME = 'MovieZone';
-  var WORKER_URL = 'https://iframe-cloud.fair-teller.workers.dev';
+  var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
