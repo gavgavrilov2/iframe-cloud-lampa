@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[iframe-cloud] Loading v5.19.0');
+  console.log('[iframe-cloud] Loading v5.20.0');
 
   var PLUGIN_NAME = 'Iframe Cloud';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -180,9 +180,28 @@
     return s.indexOf('alloha') !== -1 || s.indexOf('turbo') !== -1;
   }
 
+  /* ---- Timeline: save/restore playback position via Lampa.Timeline ---- */
+
+  function getTimelineHash(movie, label) {
+    var base = movie.original_title || movie.title || movie.name || '';
+    if (label) return Lampa.Utils.hash(label + base);
+    return Lampa.Utils.hash(base);
+  }
+
+  function updateTimeline(timeline, video) {
+    if (!timeline || !video) return;
+    var time = video.currentTime || 0;
+    var duration = video.duration || 0;
+    var percent = duration > 0 ? Math.min(100, Math.round((time / duration) * 100)) : 0;
+    timeline.time = Math.round(time);
+    timeline.duration = Math.round(duration);
+    timeline.percent = percent;
+    Lampa.Timeline.update(timeline);
+  }
+
   /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
 
-  function playHlsProxied(hlsUrl, title, movie) {
+  function playHlsProxied(hlsUrl, title, movie, label) {
     var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
     console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
     var video = {
@@ -190,11 +209,25 @@
       title: title || PLUGIN_NAME,
       subtitles: []
     };
-    if (movie && movie.id) {
-      video.timeline = { id: movie.id };
+    if (movie && (movie.id || movie.original_title || movie.title)) {
+      var hash = getTimelineHash(movie, label);
+      var timeline = Lampa.Timeline.view(hash);
+      video.timeline = timeline;
+      Lampa.Player.play(video);
+      Lampa.Player.playlist([video]);
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+        var handler = function() { updateTimeline(timeline, el); };
+        el.addEventListener('timeupdate', handler);
+        el.addEventListener('loadedmetadata', handler);
+        el.addEventListener('pause', handler);
+        el.addEventListener('ended', handler);
+      }, 1000);
+    } else {
+      Lampa.Player.play(video);
+      Lampa.Player.playlist([video]);
     }
-    Lampa.Player.play(video);
-    Lampa.Player.playlist([video]);
   }
 
   /* ---- ortified embed parsing ---- */
@@ -713,7 +746,7 @@
     if (!render || !render.length) return;
     if (render.find('.iframe-cloud-btn').length) return;
 
-    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.19.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
+    var btn = $('<div class="full-start__button selector iframe-cloud-btn" data-subtitle="v5.20.0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>' + PLUGIN_NAME + '</span></div>');
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
   }
@@ -742,7 +775,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.19.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
+      type: 'video', version: '5.20.0', name: PLUGIN_NAME, description: 'Proxied HLS via iframe.cloud', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
