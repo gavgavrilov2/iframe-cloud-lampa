@@ -40,7 +40,6 @@ export default {
     var vkVideoId = url.searchParams.get('vid');
     var vkQuality = url.searchParams.get('qual') || 'mp4_1080';
     var vkQuery = url.searchParams.get('q');
-    var vkYear = url.searchParams.get('year');
 
     if (vkStream) {
       return await handleVkStream(vkStream, corsHeaders, request);
