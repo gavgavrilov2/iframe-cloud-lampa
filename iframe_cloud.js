@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.34.0');
+  console.log('[MovieZone] Loading v5.35.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -226,58 +226,99 @@
 
   /* ---- HLS proxy: pass m3u8 through Vercel, proxy rewrites all URLs ---- */
 
+  function parseM3u8AudioNames(m3u8Text) {
+    if (!m3u8Text) return [];
+    var lines = m3u8Text.split('\n');
+    var names = [];
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/#EXT-X-MEDIA:.*TYPE=AUDIO[^"]*NAME="([^"]+)"/);
+      if (m) names.push(m[1]);
+    }
+    return names;
+  }
+
   function playHlsProxied(hlsUrl, title, movie, label) {
     var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
     console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
-    var video = {
-      url: proxyUrl,
-      title: title || PLUGIN_NAME,
-      subtitles: []
-    };
-    if (movie && (movie.id || movie.original_title || movie.title)) {
-      var hash = getTimelineHash(movie, label);
-      var timeline = Lampa.Timeline.view(hash);
-      video.timeline = timeline;
 
-      var beholdHash = getBeholdHash(movie, label);
-      markViewed(beholdHash);
-
-      window._iframe_cloud_current = {
-        timeline: timeline,
-        beholdHash: beholdHash,
-        movie: movie,
-        label: label
+    function startPlay(audioNames) {
+      var video = {
+        url: proxyUrl,
+        title: title || PLUGIN_NAME,
+        subtitles: [],
+        translate: audioNames && audioNames.length ? {
+          tracks: audioNames.map(function(name) {
+            return { language: name, label: '', extra: {} };
+          })
+        } : undefined
       };
 
-      Lampa.Player.play(video);
-      Lampa.Player.playlist([video]);
+      if (movie && (movie.id || movie.original_title || movie.title)) {
+        var hash = getTimelineHash(movie, label);
+        var timeline = Lampa.Timeline.view(hash);
+        video.timeline = timeline;
 
-      setTimeout(function() {
-        var el = document.querySelector('video');
-        if (!el) return;
+        var beholdHash = getBeholdHash(movie, label);
+        markViewed(beholdHash);
 
-        var lastSave = 0;
-        var savePos = function() {
-          var now = Date.now();
-          if (now - lastSave < 3000) return;
-          if (!el.duration || el.duration < 10) return;
-          lastSave = now;
-          timeline.time = Math.round(el.currentTime);
-          timeline.duration = Math.round(el.duration);
-          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-          Lampa.Timeline.update(timeline);
-          console.log('[iframe-cloud] Timeline saved:', timeline.time + 's / ' + timeline.duration + 's (' + timeline.percent + '%)');
+        window._iframe_cloud_current = {
+          timeline: timeline,
+          beholdHash: beholdHash,
+          movie: movie,
+          label: label
         };
 
-        el.addEventListener('timeupdate', savePos);
-        el.addEventListener('pause', savePos);
-        el.addEventListener('ended', savePos);
+        addToHistory(movie);
 
-        var doRestore = function() {
-          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-            el.currentTime = timeline.time;
-            Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-          }
+        Lampa.Player.play(video);
+        Lampa.Player.playlist([video]);
+
+        setTimeout(function() {
+          var el = document.querySelector('video');
+          if (!el) return;
+
+          var lastSave = 0;
+          var savePos = function() {
+            var now = Date.now();
+            if (now - lastSave < 3000) return;
+            if (!el.duration || el.duration < 10) return;
+            lastSave = now;
+            timeline.time = Math.round(el.currentTime);
+            timeline.duration = Math.round(el.duration);
+            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+            Lampa.Timeline.update(timeline);
+            console.log('[iframe-cloud] Timeline saved:', timeline.time + 's / ' + timeline.duration + 's (' + timeline.percent + '%)');
+          };
+
+          el.addEventListener('timeupdate', savePos);
+          el.addEventListener('pause', savePos);
+          el.addEventListener('ended', savePos);
+
+          var doRestore = function() {
+            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+              el.currentTime = timeline.time;
+              Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+            }
+          };
+
+          if (el.readyState >= 1) doRestore();
+          else el.addEventListener('loadedmetadata', doRestore);
+        }, 1500);
+      } else {
+        Lampa.Player.play(video);
+        Lampa.Player.playlist([video]);
+      }
+    }
+
+    fetchText(proxyUrl).then(function(m3u8Text) {
+      var names = parseM3u8AudioNames(m3u8Text);
+      console.log('[iframe-cloud] Parsed audio names:', names);
+      startPlay(names);
+    }).catch(function(e) {
+      console.log('[iframe-cloud] m3u8 fetch failed, playing without translate:', e.message);
+      startPlay([]);
+    });
+  }
         };
 
         if (el.readyState >= 1) doRestore();
