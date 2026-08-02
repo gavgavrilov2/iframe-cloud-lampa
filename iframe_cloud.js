@@ -768,16 +768,19 @@
         if (pageData.embedUrl) {
           var embedUrl = pageData.embedUrl;
           if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
-          console.log('[iframe-cloud] Kinogo embedUrl:', embedUrl, 'isOrtified:', pageData.isOrtified);
+          console.log('[iframe-cloud] Kinogo embedUrl:', embedUrl.substring(0, 80), 'hasCinemar:', pageData.hasCinemar, 'isOrtified:', pageData.isOrtified);
 
-          if (pageData.isOrtified) {
-            console.log('[iframe-cloud] Routing Kinogo → playOrtified');
+          if (pageData.hasCinemar && !pageData.isOrtified) {
+            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (cinemar, HIGH QUALITY)');
+            playKinogoEmbed(embedUrl, best, movie);
+          } else if (pageData.isOrtified) {
+            console.log('[iframe-cloud] Routing Kinogo → playOrtified (ortified, fallback)');
             playOrtified(embedUrl, 'Kinogo \u2014 ' + (best.title || ''), best.title, function() {
               console.log('[iframe-cloud] Kinogo playOrtified onFailure called');
               Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e');
             }, movie);
           } else {
-            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (cinemar)');
+            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (default)');
             playKinogoEmbed(embedUrl, best, movie);
           }
         } else {
@@ -804,14 +807,17 @@
     console.log('[iframe-cloud] Kinogo info URL:', infoUrl.substring(0, 120));
 
     fetchJson(infoUrl).then(function(info) {
-      console.log('[iframe-cloud] Kinogo info:', (info.tracks || []).length, 'tracks');
+      console.log('[iframe-cloud] Kinogo info:', (info.tracks || []).length, 'tracks, directM3u8:', !!info.directM3u8);
 
       var tracks = (info.tracks || []).map(function(t) {
         return { language: t.name, label: '', extra: {} };
       });
 
+      var videoUrl = info.directM3u8 || multiUrl;
+      console.log('[iframe-cloud] Kinogo using:', info.directM3u8 ? 'directM3u8 (HIGH QUALITY via cfnd.cinemap.cc)' : 'multi-audio via Worker');
+
       var play = {
-        url: multiUrl,
+        url: videoUrl,
         title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
         subtitles: [],
         translate: tracks.length ? { tracks: tracks } : undefined

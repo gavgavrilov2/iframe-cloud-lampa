@@ -895,9 +895,7 @@ async function handleKinogoPage(pageUrl, corsHeaders) {
     var ortifiedMatch = html.match(/data-src="(https?:\/\/api\.ortified\.ws\/embed\/[^"]+)"/);
     if (ortifiedMatch) ortifiedUrl = ortifiedMatch[1];
 
-    if (ortifiedUrl) {
-      embedMatch = ortifiedMatch;
-    }
+    var hasCinemar = !!embedMatch;
     var titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
     var title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/\s*\(\d{4}\)\s*/, '').trim() : '';
     var yearMatch = html.match(/Год выпуска[^<]*<a[^>]*>(\d{4})/);
@@ -905,7 +903,9 @@ async function handleKinogoPage(pageUrl, corsHeaders) {
 
     return new Response(JSON.stringify({
       embedUrl: embedMatch ? embedMatch[1] : null,
+      ortifiedUrl: ortifiedUrl,
       isOrtified: !!(embedMatch && embedMatch[1] && embedMatch[1].indexOf('ortified.ws') !== -1),
+      hasCinemar: hasCinemar,
       title: title,
       year: year,
       url: pageUrl
@@ -989,19 +989,19 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var resp = await fetch(embedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'ru-RU,ru;q=0.9',
-        'Referer': KINOGO_BASE + '/'
-      }
-    });
+    var resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
     var html = await resp.text();
 
     var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
     if (!fileMatch) {
-      resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
+      resp = await fetch(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'ru-RU,ru;q=0.9',
+          'Referer': KINOGO_BASE + '/'
+        }
+      });
       html = await resp.text();
       fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
     }
@@ -1024,6 +1024,7 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
     workerBase = 'https://silent-recipe-5c08.rustypony.workers.dev';
 
     var tracks = [];
+    var firstFile = null;
     for (var i = 0; i < playlist.length; i++) {
       var item = playlist[i];
       if (!item.file) continue;
@@ -1031,10 +1032,13 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
       voiceName = voiceName.replace(/<[^>]+>/g, '').replace(/,/g, ' ').trim();
       if (!voiceName) voiceName = 'Voice ' + (i + 1);
 
+      if (!firstFile) firstFile = item.file;
+
       tracks.push({
         name: voiceName,
         lang: 'ru',
-        subtitles: item.subtitle || ''
+        subtitles: item.subtitle || '',
+        file: item.file || ''
       });
     }
 
@@ -1042,7 +1046,13 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
     try { encodedEmbed = encodeURIComponent(embedUrl); } catch(e) {}
     var m3u8Path = '/kinogo/' + encodedEmbed + '/master.m3u8';
 
-    return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path }), {
+    var directM3u8 = null;
+    if (firstFile) {
+      var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
+      directM3u8 = vercelBase + encodeURIComponent(firstFile);
+    }
+
+    return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path, directM3u8: directM3u8 }), {
       status: 200, headers: corsHeaders
     });
   } catch (e) {
