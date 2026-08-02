@@ -229,12 +229,38 @@
   function parseM3u8AudioNames(m3u8Text) {
     if (!m3u8Text) return [];
     var lines = m3u8Text.split('\n');
-    var names = [];
+    var tracks = [];
+    var langCount = {};
+    var seenNames = {};
     for (var i = 0; i < lines.length; i++) {
-      var m = lines[i].match(/#EXT-X-MEDIA:.*TYPE=AUDIO[^"]*NAME="([^"]+)"/);
-      if (m) names.push(m[1]);
+      var line = lines[i];
+      if (line.indexOf('#EXT-X-MEDIA:') === -1) continue;
+      if (line.indexOf('TYPE=AUDIO') === -1) continue;
+
+      var nameMatch = line.match(/NAME="([^"]+)"/);
+      var langMatch = line.match(/LANGUAGE="([^"]+)"/);
+      var name = nameMatch ? nameMatch[1] : '';
+      var lang = langMatch ? langMatch[1] : '';
+
+      if (seenNames[name]) continue;
+      seenNames[name] = true;
+
+      var humanName = name;
+
+      if (lang && (/^(rus\d*|ru)$/i.test(name) || /^(rus\d*|ru)$/i.test(lang))) {
+        langCount['ru'] = (langCount['ru'] || 0) + 1;
+        humanName = langCount['ru'] === 1 ? '\u0420\u0443\u0441. \u0434\u0443\u0431\u043b\u044f\u0436' : '\u0420\u0443\u0441. \u0434\u0443\u0431\u043b\u044f\u0436 ' + langCount['ru'];
+      } else if (lang && (/^(eng\d*|en)$/i.test(name) || /^(eng\d*|en)$/i.test(lang))) {
+        langCount['en'] = (langCount['en'] || 0) + 1;
+        humanName = langCount['en'] === 1 ? 'English (Original)' : 'English ' + langCount['en'];
+      } else if (lang && (/^(ukr\d*|uk)$/i.test(name) || /^(ukr\d*|uk)$/i.test(lang))) {
+        langCount['uk'] = (langCount['uk'] || 0) + 1;
+        humanName = langCount['uk'] === 1 ? '\u0423\u043a\u0440. \u0434\u0443\u0431\u043b\u044f\u0436' : '\u0423\u043a\u0440. \u0434\u0443\u0431\u043b\u044f\u0436 ' + langCount['uk'];
+      }
+
+      tracks.push({ name: humanName, originalName: name, lang: lang });
     }
-    return names;
+    return tracks;
   }
 
   function playHlsProxied(hlsUrl, title, movie, label) {
@@ -247,8 +273,8 @@
         title: title || PLUGIN_NAME,
         subtitles: [],
         translate: audioNames && audioNames.length ? {
-          tracks: audioNames.map(function(name) {
-            return { language: name, label: '', extra: {} };
+          tracks: audioNames.map(function(t) {
+            return { language: t.name, label: '', extra: {} };
           })
         } : undefined
       };
@@ -311,9 +337,9 @@
     }
 
     fetchText(proxyUrl).then(function(m3u8Text) {
-      var names = parseM3u8AudioNames(m3u8Text);
-      console.log('[iframe-cloud] Parsed audio names:', names);
-      startPlay(names);
+      var tracks = parseM3u8AudioNames(m3u8Text);
+      console.log('[iframe-cloud] Parsed audio tracks:', tracks.map(function(t) { return t.name; }));
+      startPlay(tracks);
     }).catch(function(e) {
       console.log('[iframe-cloud] m3u8 fetch failed, playing without translate:', e.message);
       startPlay([]);
