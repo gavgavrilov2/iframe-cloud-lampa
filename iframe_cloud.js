@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.31.0');
+  console.log('[MovieZone] Loading v5.34.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -643,6 +643,21 @@
 
   /* ---- Kinogo/cinemar.cc: search → multi-audio m3u8 → native player ---- */
 
+  function parseSubtitles(str) {
+    if (!str || typeof str !== 'string') return [];
+    return str.split(',').map(function(s, i) {
+      var m = s.match(/^\[(\w+)\](.+)$/);
+      return {
+        index: i,
+        label: m ? m[1] : 'Sub ' + (i + 1),
+        language: m ? m[1] : '',
+        url: m ? m[2].trim() : s.trim(),
+        mode: 'disabled',
+        selected: false
+      };
+    });
+  }
+
   function searchAndPlayKinogo(movie) {
     var title = movie.title || movie.original_title || movie.name || '';
     var year = getYear(movie);
@@ -694,61 +709,83 @@
 
     console.log('[iframe-cloud] Kinogo multi-audio URL:', multiUrl.substring(0, 120));
 
-    var play = {
-      url: multiUrl,
-      title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
-      subtitles: []
-    };
+    var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
+    console.log('[iframe-cloud] Kinogo info URL:', infoUrl.substring(0, 120));
 
-    var hash = getTimelineHash(movie, 'Kinogo');
-    var timeline = Lampa.Timeline.view(hash);
-    play.timeline = timeline;
+    fetchJson(infoUrl).then(function(info) {
+      console.log('[iframe-cloud] Kinogo info:', (info.tracks || []).length, 'tracks');
 
-    var beholdHash = getBeholdHash(movie, 'Kinogo');
-    markViewed(beholdHash);
+      var tracks = (info.tracks || []).map(function(t) {
+        return { language: t.name, label: '', extra: {} };
+      });
 
-    window._iframe_cloud_current = {
-      timeline: timeline,
-      beholdHash: beholdHash,
-      movie: movie,
-      label: 'Kinogo'
-    };
-
-    addToHistory(movie);
-
-    Lampa.Player.play(play);
-    Lampa.Player.playlist([play]);
-
-    setTimeout(function() {
-      var el = document.querySelector('video');
-      if (!el) return;
-
-      var lastSave = 0;
-      var savePos = function() {
-        var now = Date.now();
-        if (now - lastSave < 3000) return;
-        if (!el.duration || el.duration < 10) return;
-        lastSave = now;
-        timeline.time = Math.round(el.currentTime);
-        timeline.duration = Math.round(el.duration);
-        timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-        Lampa.Timeline.update(timeline);
+      var play = {
+        url: multiUrl,
+        title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
+        subtitles: [],
+        translate: tracks.length ? { tracks: tracks } : undefined
       };
 
-      el.addEventListener('timeupdate', savePos);
-      el.addEventListener('pause', savePos);
-      el.addEventListener('ended', savePos);
+      var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
+      if (firstSubs) {
+        play.subtitles = parseSubtitles(firstSubs);
+        console.log('[iframe-cloud] Kinogo subtitles:', play.subtitles.length);
+      }
 
-      var doRestore = function() {
-        if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-          el.currentTime = timeline.time;
-          Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-        }
+      var hash = getTimelineHash(movie, 'Kinogo');
+      var timeline = Lampa.Timeline.view(hash);
+      play.timeline = timeline;
+
+      var beholdHash = getBeholdHash(movie, 'Kinogo');
+      markViewed(beholdHash);
+
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: 'Kinogo'
       };
 
-      if (el.readyState >= 1) doRestore();
-      else el.addEventListener('loadedmetadata', doRestore);
-    }, 1500);
+      addToHistory(movie);
+
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          timeline.time = Math.round(el.currentTime);
+          timeline.duration = Math.round(el.duration);
+          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(timeline);
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+            el.currentTime = timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
+
+    }).catch(function(e) {
+      console.log('[iframe-cloud] Kinogo info error:', e.message);
+      Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
+    });
   }
 
   /* ---- iframe fallback (for non-ortified players or failures) ---- */

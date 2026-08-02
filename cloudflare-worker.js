@@ -24,6 +24,7 @@ export default {
     const fanfilmPage = url.searchParams.get('fanfilm_page');
     const straversUrl = url.searchParams.get('stravers');
     const kinogoSearch = url.searchParams.get('kinogo_search');
+    const kinogoInfo = url.searchParams.get('kinogo_info');
     const kinogoEmbed = url.searchParams.get('kinogo_embed');
     const kinogoMulti = url.searchParams.get('kinogo_multi');
     const kinogoStream = url.searchParams.get('kinogo_stream');
@@ -36,6 +37,10 @@ export default {
 
     if (kinogoMulti) {
       return await handleKinogoMulti(kinogoMulti.replace(/ /g, '+'), corsHeaders, request);
+    }
+
+    if (kinogoInfo) {
+      return await handleKinogoInfo(kinogoInfo.replace(/ /g, '+'), corsHeaders);
     }
 
     if (kinogoStream) {
@@ -956,6 +961,73 @@ function decodePlayerjs(encoded) {
   }
 }
 
+async function handleKinogoInfo(embedUrl, corsHeaders) {
+  try {
+    if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
+
+    var resp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+        'Referer': KINOGO_BASE + '/'
+      }
+    });
+    var html = await resp.text();
+
+    var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    if (!fileMatch) {
+      resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
+      html = await resp.text();
+      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
+    }
+    if (!fileMatch) {
+      return new Response(JSON.stringify({ tracks: [], m3u8: null }), {
+        status: 200, headers: corsHeaders
+      });
+    }
+
+    var playlist = decodePlayerjs(fileMatch[1]);
+    if (!playlist || !playlist.length) {
+      return new Response(JSON.stringify({ tracks: [], m3u8: null }), {
+        status: 200, headers: corsHeaders
+      });
+    }
+
+    var workerBase = new URL('https://silent-recipe-5c08.rustypony.workers.dev');
+    try { workerBase = new URL(embedUrl).origin; } catch(e) {}
+    try { workerBase = new URL('https://silent-recipe-5c08.rustypony.workers.dev'); } catch(e) {}
+    workerBase = 'https://silent-recipe-5c08.rustypony.workers.dev';
+
+    var tracks = [];
+    for (var i = 0; i < playlist.length; i++) {
+      var item = playlist[i];
+      if (!item.file) continue;
+      var voiceName = item.title || 'Voice ' + (i + 1);
+      voiceName = voiceName.replace(/<[^>]+>/g, '').replace(/,/g, ' ').trim();
+      if (!voiceName) voiceName = 'Voice ' + (i + 1);
+
+      tracks.push({
+        name: voiceName,
+        lang: 'ru',
+        subtitles: item.subtitle || ''
+      });
+    }
+
+    var encodedEmbed = embedUrl;
+    try { encodedEmbed = encodeURIComponent(embedUrl); } catch(e) {}
+    var m3u8Path = '/kinogo/' + encodedEmbed + '/master.m3u8';
+
+    return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path }), {
+      status: 200, headers: corsHeaders
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ tracks: [], m3u8: null, error: e.message }), {
+      status: 200, headers: corsHeaders
+    });
+  }
+}
+
 async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
@@ -991,6 +1063,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
+    var workerBase = new URL(request.url).origin;
     var voices = [];
     for (var i = 0; i < playlist.length; i++) {
       var item = playlist[i];
@@ -1003,7 +1076,6 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       try { voiceUrl = decodeURIComponent(voiceUrl); } catch(e) {}
 
       var streamParam = encodeURIComponent(voiceUrl);
-      var workerBase = new URL(request.url).origin;
       var proxyUrl = workerBase + '/?kinogo_stream=' + streamParam;
 
       voices.push({ name: voiceName, url: voiceUrl, proxyUrl: proxyUrl, subtitles: item.subtitle || '' });
@@ -1030,7 +1102,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       variantResp = await fetchViaVercel(firstVoice.url, 'https://cinemar.cc/');
       variantM3u8 = await variantResp.text();
     }
-    var variants = parseVariants(variantM3u8, firstVoice.proxyUrl);
+    var variants = parseVariants(variantM3u8, workerBase, firstVoice.proxyUrl);
 
     var lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
 
@@ -1069,7 +1141,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   }
 }
 
-function parseVariants(m3u8, baseProxyUrl) {
+function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
   var lines = m3u8.split('\n');
   var variants = [];
   var bandwidthMap = { '240': 406000, '360': 696000, '480': 1328000, '720': 2892000, '1080': 5592000 };
@@ -1093,13 +1165,15 @@ function parseVariants(m3u8, baseProxyUrl) {
           var baseParts = baseProxyUrl.split('=');
           var originalBase = decodeURIComponent(baseParts[1] || '');
           var dir = originalBase.replace(/\/[^\/]*$/, '/');
-          fullUrl = baseParts[0] + '=' + encodeURIComponent(dir + nextLine);
+          fullUrl = dir + nextLine;
         }
+
+        var proxyUrl = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(fullUrl);
 
         variants.push({
           bandwidth: bw,
           resolution: res,
-          proxyUrl: fullUrl,
+          proxyUrl: proxyUrl,
           quality: qNum
         });
       }
