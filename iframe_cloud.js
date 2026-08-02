@@ -319,16 +319,6 @@
       startPlay([]);
     });
   }
-        };
-
-        if (el.readyState >= 1) doRestore();
-        else el.addEventListener('loadedmetadata', doRestore);
-      }, 1500);
-    } else {
-      Lampa.Player.play(video);
-      Lampa.Player.playlist([video]);
-    }
-  }
 
   /* ---- ortified embed parsing ---- */
 
