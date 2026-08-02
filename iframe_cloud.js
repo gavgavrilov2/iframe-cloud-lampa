@@ -813,8 +813,8 @@
         return { language: t.name, label: '', extra: {} };
       });
 
-      var videoUrl = info.directM3u8 || multiUrl;
-      console.log('[iframe-cloud] Kinogo using:', info.directM3u8 ? 'directM3u8 (HIGH QUALITY via cfnd.cinemap.cc)' : 'multi-audio via Worker');
+      var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : (info.directM3u8 || multiUrl);
+      console.log('[iframe-cloud] Kinogo using:', info.m3u8 ? 'multi-audio m3u8 (1080p + voice switching via cfnd.cinemap.cc)' : (info.directM3u8 ? 'directM3u8 (single voice)' : 'fallback multiUrl'));
 
       var play = {
         url: videoUrl,

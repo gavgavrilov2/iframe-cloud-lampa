@@ -1068,19 +1068,21 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var embedResp = await fetch(embedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'ru-RU,ru;q=0.9',
-        'Referer': KINOGO_BASE + '/'
-      }
-    });
+    var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
+
+    var embedResp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
     var html = await embedResp.text();
 
     var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
     if (!fileMatch) {
-      embedResp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
+      embedResp = await fetch(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'ru-RU,ru;q=0.9',
+          'Referer': KINOGO_BASE + '/'
+        }
+      });
       html = await embedResp.text();
       fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
     }
@@ -1099,7 +1101,6 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
-    var workerBase = new URL(request.url).origin;
     var voices = [];
     for (var i = 0; i < playlist.length; i++) {
       var item = playlist[i];
@@ -1110,11 +1111,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       var voiceUrl = item.file;
       if (voiceUrl.indexOf('http') !== 0) voiceUrl = 'https:' + voiceUrl;
       try { voiceUrl = decodeURIComponent(voiceUrl); } catch(e) {}
-
-      var streamParam = encodeURIComponent(voiceUrl);
-      var proxyUrl = workerBase + '/?kinogo_stream=' + streamParam;
-
-      voices.push({ name: voiceName, url: voiceUrl, proxyUrl: proxyUrl, subtitles: item.subtitle || '' });
+      voices.push({ name: voiceName, url: voiceUrl });
     }
 
     if (!voices.length) {
@@ -1124,21 +1121,21 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
-    var firstVoice = voices[0];
-    var variantResp = await fetch(firstVoice.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Referer': 'https://cinemar.cc/',
-        'Origin': 'https://cinemar.cc'
-      }
-    });
+    var firstMasterVercel = vercelBase + encodeURIComponent(voices[0].url);
+    var variantResp = await fetch(firstMasterVercel);
     var variantM3u8 = await variantResp.text();
-    if (variantM3u8.indexOf('#EXT-X-STREAM-INF') === -1) {
-      variantResp = await fetchViaVercel(firstVoice.url, 'https://cinemar.cc/');
-      variantM3u8 = await variantResp.text();
+    var variants = parseVariantsFromM3u8(variantM3u8);
+
+    var voiceSuffixes = [''];
+    for (var v = 1; v < voices.length; v++) {
+      var hm = voices[v].url.match(/hls(-[^.]+)\.m3u8$/);
+      voiceSuffixes.push(hm ? hm[1] : '');
     }
-    var variants = parseVariants(variantM3u8, workerBase, firstVoice.proxyUrl);
+
+    var audioVariant = variants[0];
+    for (var q = 1; q < variants.length; q++) {
+      if (variants[q].bandwidth > audioVariant.bandwidth) audioVariant = variants[q];
+    }
 
     var lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
 
@@ -1146,19 +1143,14 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       var voice = voices[v];
       var defaultAttr = v === 0 ? ',DEFAULT=YES' : '';
       var autoSelect = v === 0 ? ',AUTOSELECT=YES' : '';
-      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + voice.proxyUrl + '",NAME="' + voice.name + '"');
+      var audioUrl = replaceVariantSuffix(audioVariant.url, voiceSuffixes[v]);
+      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
     }
 
-    if (variants.length) {
-      for (var q = 0; q < variants.length; q++) {
-        var variant = variants[q];
-        var audioAttr = ',AUDIO="audio"';
-        lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + audioAttr);
-        lines.push(variant.proxyUrl);
-      }
-    } else {
-      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=5600000,RESOLUTION=1920x1080,AUDIO="audio"');
-      lines.push(firstVoice.proxyUrl);
+    for (var q = 0; q < variants.length; q++) {
+      var variant = variants[q];
+      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + ',AUDIO="audio"');
+      lines.push(variant.url);
     }
 
     return new Response(lines.join('\n'), {
@@ -1175,6 +1167,36 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
     });
   }
+}
+
+function parseVariantsFromM3u8(m3u8) {
+  var lines = m3u8.split('\n');
+  var variants = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
+      var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+      if (nextLine && nextLine.indexOf('#') !== 0 && nextLine.indexOf('http') === 0) {
+        var bwMatch = line.match(/BANDWIDTH=(\d+)/);
+        var bw = bwMatch ? parseInt(bwMatch[1]) : 1000000;
+        var resMatch = line.match(/RESOLUTION=(\d+x\d+)/);
+        var res = resMatch ? resMatch[1] : '1280x720';
+        var quality = nextLine.match(/\.(\d+)\.mp4/);
+        var qNum = quality ? parseInt(quality[1]) : 0;
+        variants.push({ bandwidth: bw, resolution: res, url: nextLine, quality: qNum });
+      }
+    }
+  }
+  variants.sort(function(a, b) { return b.quality - a.quality; });
+  return variants;
+}
+
+function replaceVariantSuffix(vercelUrl, newSuffix) {
+  var match = vercelUrl.match(/url=([^&]+)/);
+  if (!match) return vercelUrl;
+  var originalUrl = decodeURIComponent(match[1]);
+  originalUrl = originalUrl.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
+  return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
 }
 
 function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
