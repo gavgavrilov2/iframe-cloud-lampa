@@ -1048,8 +1048,10 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
 
     var directM3u8 = null;
     if (firstFile) {
+      var fileUrl = firstFile;
+      if (fileUrl.startsWith('//')) fileUrl = 'https:' + fileUrl;
       var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
-      directM3u8 = vercelBase + encodeURIComponent(firstFile);
+      directM3u8 = vercelBase + encodeURIComponent(fileUrl);
     }
 
     return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path, directM3u8: directM3u8 }), {
