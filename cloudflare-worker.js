@@ -895,7 +895,7 @@ async function handleKinogoPage(pageUrl, corsHeaders) {
     var ortifiedMatch = html.match(/data-src="(https?:\/\/api\.ortified\.ws\/embed\/[^"]+)"/);
     if (ortifiedMatch) ortifiedUrl = ortifiedMatch[1];
 
-    if (!embedMatch && ortifiedUrl) {
+    if (ortifiedUrl) {
       embedMatch = ortifiedMatch;
     }
     var titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
@@ -905,7 +905,7 @@ async function handleKinogoPage(pageUrl, corsHeaders) {
 
     return new Response(JSON.stringify({
       embedUrl: embedMatch ? embedMatch[1] : null,
-      isOrtified: !!(ortifiedUrl && embedMatch && embedMatch[1] && embedMatch[1].indexOf('ortified.ws') !== -1),
+      isOrtified: !!(embedMatch && embedMatch[1] && embedMatch[1].indexOf('ortified.ws') !== -1),
       title: title,
       year: year,
       url: pageUrl
