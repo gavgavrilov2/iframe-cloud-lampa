@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.35.0');
+  console.log('[MovieZone] Loading v5.40.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -54,11 +54,10 @@
 
   function searchKPByKeyword(keyword) {
     var url = KPU_API + '?keyword=' + encodeURIComponent(keyword) + '&page=1';
-    console.log('[iframe-cloud] KPU search:', keyword);
+
     return fetchJson(proxyKpu(url))
       .then(function(data) {
         var films = data.films || [];
-        console.log('[iframe-cloud] KPU got', films.length, 'results');
         return films;
       })
       .catch(function(e) {
@@ -91,7 +90,6 @@
         for (var n = 0; n < names.length; n++) {
           if (titleMatch(names[n], title)) {
             var fId = f.filmId || f.kinopoiskId || f.id;
-            console.log('[iframe-cloud] KPU matched:', fId, f.nameRu, f.year);
             return fId;
           }
         }
@@ -102,7 +100,6 @@
           return parseFloat(b.rating || 0) - parseFloat(a.rating || 0);
         })[0];
         var bestId = best.filmId || best.kinopoiskId || best.id;
-        console.log('[iframe-cloud] KPU best guess:', bestId, best.nameRu, best.year);
         return bestId;
       }
 
@@ -115,18 +112,15 @@
 
     var imdbId = movie.imdb_id || (movie.external_ids && movie.external_ids.imdb_id);
     if (imdbId) {
-      console.log('[iframe-cloud] Trying IMDb:', imdbId);
       return fetchJsonViaProxy(KP_API_BASE + '?externalId.imdb=' + imdbId + '&selectFields=id,name&token=' + KP_API_TOKEN)
         .then(function(d) {
           if (d.docs && d.docs.length) {
             var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
             return best && best.id || null;
           }
-          console.log('[iframe-cloud] IMDb not found in KP, trying name search');
           return searchKinopoiskByName(movie);
         })
         .catch(function() {
-          console.log('[iframe-cloud] IMDb lookup failed, trying name search');
           return searchKinopoiskByName(movie);
         });
     }
@@ -138,7 +132,6 @@
       var query = tmdbId ? 'externalId.tmdb=' + tmdbId : null;
       if (!query) return null;
 
-      console.log('[iframe-cloud] Fallback to TMDB:', tmdbId);
       return fetchJsonViaProxy(KP_API_BASE + '?' + query + '&selectFields=id,name&token=' + KP_API_TOKEN)
         .then(function(d) {
           if (!d.docs || !d.docs.length) return null;
@@ -154,11 +147,9 @@
   function getPlayers(kpId, tmdbId) {
     var url = IFRAME_CLOUD_API + '?action=players&kp_id=' + kpId + '&type=movie';
     if (tmdbId) url += '&id=' + tmdbId;
-    console.log('[iframe-cloud] Fetching players:', url);
     return fetchJsonViaProxy(url)
       .then(function(data) {
         var players = data.players || [];
-        console.log('[iframe-cloud] Got', players.length, 'players');
         return players;
       });
   }
@@ -167,7 +158,6 @@
     attempt = attempt || 0;
     return getPlayers(kpId, tmdbId).then(function(players) {
       if (players.length === 0 && attempt < 3) {
-        console.log('[iframe-cloud] Retry in 1.5s, attempt', attempt + 1);
         return new Promise(function(resolve) {
           setTimeout(function() {
             resolve(getPlayersWithRetry(kpId, tmdbId, attempt + 1));
@@ -265,7 +255,6 @@
 
   function playHlsProxied(hlsUrl, title, movie, label, externalAudioNames) {
     var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
-    console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
 
     function startPlay(audioNames) {
       var video = {
@@ -313,7 +302,6 @@
             timeline.duration = Math.round(el.duration);
             timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
             Lampa.Timeline.update(timeline);
-            console.log('[iframe-cloud] Timeline saved:', timeline.time + 's / ' + timeline.duration + 's (' + timeline.percent + '%)');
           };
 
           el.addEventListener('timeupdate', savePos);
@@ -337,17 +325,14 @@
     }
 
     if (externalAudioNames && externalAudioNames.length) {
-      console.log('[iframe-cloud] Using external audio names:', externalAudioNames);
       startPlay(externalAudioNames.map(function(n) { return { name: n }; }));
       return;
     }
 
     fetchText(proxyUrl).then(function(m3u8Text) {
       var tracks = parseM3u8AudioNames(m3u8Text);
-      console.log('[iframe-cloud] Parsed audio tracks:', tracks.map(function(t) { return t.name; }));
       startPlay(tracks);
     }).catch(function(e) {
-      console.log('[iframe-cloud] m3u8 fetch failed, playing without translate:', e.message);
       startPlay([]);
     });
   }
@@ -408,9 +393,7 @@
       if (arrStr) {
         try {
           result.seasons = JSON.parse(arrStr);
-          console.log('[iframe-cloud] Parsed', result.seasons.length, 'seasons from ortified');
         } catch (e) {
-          console.log('[iframe-cloud] seasons JSON parse error:', e.message);
         }
       }
     }
@@ -432,7 +415,6 @@
       if (!hlsMatch) hlsMatch = mkScript.match(/hls\s*:\s*"([^"]+)"/);
       if (hlsMatch) {
         result.hlsUrl = hlsMatch[1];
-        console.log('[iframe-cloud] Parsed single HLS URL from ortified');
       }
     }
 
@@ -557,10 +539,8 @@
         }
       }
 
-      console.log('[iframe-cloud] FanFilm found:', best.title, best.url);
 
       fetchJson(WORKER_URL + '/?fanfilm_page=' + encodeURIComponent(best.url)).then(function(pageData) {
-        console.log('[iframe-cloud] FanFilm page:', pageData.title, pageData.quality, pageData.iframeUrl);
 
         if (pageData.iframeUrl) {
           var proxiedUrl = WORKER_URL + '/?stravers=' + encodeURIComponent(pageData.iframeUrl);
@@ -621,7 +601,6 @@
       }
 
       var best = videos[0];
-      console.log('[iframe-cloud] VK found:', best.title, best.quality, best.duration + 's');
 
       var titleTime = '';
       if (best.duration > 0) {
@@ -636,7 +615,6 @@
         var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
         var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
 
-        console.log('[iframe-cloud] VK embed qualities:', mp4Qualities.join(', '), 'best:', bestQuality + 'p', 'hls:', !!info.hls);
 
         Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
@@ -759,32 +737,24 @@
       }
       if (!best) best = results[0];
 
-      console.log('[iframe-cloud] Kinogo found:', best.title, best.year, best.url);
 
       Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + (best.year || '?') + ')');
 
       fetchJson(WORKER_URL + '/?kinogo_page=' + encodeURIComponent(best.url)).then(function(pageData) {
-        console.log('[iframe-cloud] Kinogo pageData:', JSON.stringify(pageData).substring(0, 300));
         if (pageData.embedUrl) {
           var embedUrl = pageData.embedUrl;
           if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
-          console.log('[iframe-cloud] Kinogo embedUrl:', embedUrl.substring(0, 80), 'hasCinemar:', pageData.hasCinemar, 'isOrtified:', pageData.isOrtified);
 
           if (pageData.hasCinemar && !pageData.isOrtified) {
-            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (cinemar, HIGH QUALITY)');
             playKinogoEmbed(embedUrl, best, movie);
           } else if (pageData.isOrtified) {
-            console.log('[iframe-cloud] Routing Kinogo → playOrtified (ortified, fallback)');
             playOrtified(embedUrl, 'Kinogo \u2014 ' + (best.title || ''), best.title, function() {
-              console.log('[iframe-cloud] Kinogo playOrtified onFailure called');
               Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e');
             }, movie);
           } else {
-            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (default)');
             playKinogoEmbed(embedUrl, best, movie);
           }
         } else {
-          console.log('[iframe-cloud] Kinogo embedUrl is null, pageData:', JSON.stringify(pageData));
           Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u043f\u043b\u0435\u0435\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
         }
       }).catch(function(e) {
@@ -801,20 +771,16 @@
   function playKinogoEmbed(embedUrl, result, movie) {
     var multiUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
 
-    console.log('[iframe-cloud] Kinogo multi-audio URL:', multiUrl.substring(0, 120));
 
     var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
-    console.log('[iframe-cloud] Kinogo info URL:', infoUrl.substring(0, 120));
 
     fetchJson(infoUrl).then(function(info) {
-      console.log('[iframe-cloud] Kinogo info:', (info.tracks || []).length, 'tracks, directM3u8:', !!info.directM3u8);
 
       var tracks = (info.tracks || []).map(function(t) {
         return { language: t.name, label: '', extra: {} };
       });
 
       var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : (info.directM3u8 || multiUrl);
-      console.log('[iframe-cloud] Kinogo using:', info.m3u8 ? 'multi-audio m3u8 (1080p + voice switching via cfnd.cinemap.cc)' : (info.directM3u8 ? 'directM3u8 (single voice)' : 'fallback multiUrl'));
 
       var play = {
         url: videoUrl,
@@ -826,7 +792,6 @@
       var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
       if (firstSubs) {
         play.subtitles = parseSubtitles(firstSubs);
-        console.log('[iframe-cloud] Kinogo subtitles:', play.subtitles.length);
       }
 
       var hash = getTimelineHash(movie, 'Kinogo');
@@ -924,28 +889,22 @@
   function fetchOrtifiedViaProxies(url) {
     return fetchTextViaVercel(url)
       .catch(function(e) {
-        console.log('[iframe-cloud] Vercel failed:', e.message, '- trying Worker');
         return fetchText(proxy(url));
       });
   }
 
   function playOrtified(url, playerLabel, movieTitle, onFailure, movie) {
-    console.log('[iframe-cloud] playOrtified:', url.substring(0, 100), 'label:', playerLabel);
     Lampa.Noty.show(PLUGIN_NAME + ': \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 ' + playerLabel + '...');
 
     fetchOrtifiedViaProxies(url).then(function(html) {
-      console.log('[iframe-cloud] ortified HTML length:', html.length);
       var data = parseOrtifiedEmbed(html);
-      console.log('[iframe-cloud] ortified parsed:', 'seasons:', data.seasons.length, 'hls:', !!data.hlsUrl, 'audioNames:', data.audioNames.length);
 
       if (data.seasons.length > 0) {
         Lampa.Noty.show(PLUGIN_NAME + ': \u0441\u0435\u0440\u0438\u0430\u043b, ' + data.seasons.length + ' \u0441\u0435\u0437\u043e\u043d(\u043e\u0432)');
         showSeasonSelector(data.seasons, movieTitle, data.current, movie);
       } else if (data.hlsUrl) {
-        console.log('[iframe-cloud] ortified HLS:', data.hlsUrl.substring(0, 100));
         playHlsProxied(data.hlsUrl, movieTitle, movie, null, data.audioNames);
       } else {
-        console.log('[iframe-cloud] ortified no HLS found, html snippet:', html.substring(0, 200));
         Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c iframe...');
         showIframePlayer(url, playerLabel, onFailure);
       }
@@ -1013,7 +972,6 @@
 
       return { tryUrls: tryUrls, fileList: fileList };
     } catch (e) {
-      console.log('[iframe-cloud] Alloha fileList parse error:', e.message);
       return null;
     }
   }
@@ -1119,7 +1077,6 @@
       var data = parseOrtifiedEmbed(html);
 
       if (data.hlsUrl) {
-        console.log('[iframe-cloud] Found HLS in', p.source, ':', data.hlsUrl.substring(0, 80));
         handleNext({ label: label, hls: data.hlsUrl, quality: p.quality, url: url });
       } else if (data.seasons.length) {
         handleNext({ label: label, seasons: data.seasons, current: data.current, quality: p.quality, url: url });
@@ -1158,7 +1115,6 @@
     var testUrl = urls[index];
     fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(testUrl)).then(function(text) {
       if (text && text.indexOf('.m3u8') !== -1 && text.indexOf('#EXTM3U') !== -1) {
-        console.log('[iframe-cloud] Alloha HLS found at url index', index);
         done(testUrl);
       } else {
         tryAllohaUrls(urls, index + 1, done);
@@ -1202,7 +1158,6 @@
         source: 'tmdb'
       }, 100);
     } catch (e) {
-      console.log('[iframe-cloud] History error:', e.message);
     }
   }
 
@@ -1221,7 +1176,6 @@
           return;
         }
 
-        console.log('[iframe-cloud] KP ID:', kpId);
 
         return getPlayersWithRetry(kpId, id).then(function(players) {
           players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
