@@ -767,9 +767,16 @@
         if (pageData.embedUrl) {
           var embedUrl = pageData.embedUrl;
           if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
-          playKinogoEmbed(embedUrl, best, movie);
+
+          if (pageData.isOrtified) {
+            playOrtified(embedUrl, 'Kinogo \u2014 ' + (best.title || ''), best.title, function() {
+              Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e');
+            }, movie);
+          } else {
+            playKinogoEmbed(embedUrl, best, movie);
+          }
         } else {
-          Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — плеер не найден');
+          Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u043f\u043b\u0435\u0435\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
         }
       }).catch(function(e) {
         console.log('[iframe-cloud] Kinogo page error:', e.message);

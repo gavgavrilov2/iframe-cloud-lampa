@@ -884,20 +884,20 @@ async function handleKinogoSearch(query, corsHeaders) {
 
 async function handleKinogoPage(pageUrl, corsHeaders) {
   try {
-    var resp = await fetch(pageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'ru-RU,ru;q=0.9',
-        'Referer': KINOGO_BASE + '/'
-      }
-    });
+    var resp = await fetchViaVercel(pageUrl, KINOGO_BASE + '/');
     var html = await resp.text();
 
     var embedMatch = html.match(/data-src="(https?:\/\/cinemar\.cc\/embed\/[^"]+)"/);
     if (!embedMatch) embedMatch = html.match(/data-src="(\/\/cinemar\.cc\/embed\/[^"]+)"/);
     if (!embedMatch) embedMatch = html.match(/src="(https?:\/\/cinemar\.cc\/embed\/[^"]+)"/);
 
+    var ortifiedUrl = null;
+    var ortifiedMatch = html.match(/data-src="(https?:\/\/api\.ortified\.ws\/embed\/[^"]+)"/);
+    if (ortifiedMatch) ortifiedUrl = ortifiedMatch[1];
+
+    if (!embedMatch && ortifiedUrl) {
+      embedMatch = ortifiedMatch;
+    }
     var titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
     var title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/\s*\(\d{4}\)\s*/, '').trim() : '';
     var yearMatch = html.match(/Год выпуска[^<]*<a[^>]*>(\d{4})/);
@@ -905,6 +905,7 @@ async function handleKinogoPage(pageUrl, corsHeaders) {
 
     return new Response(JSON.stringify({
       embedUrl: embedMatch ? embedMatch[1] : null,
+      isOrtified: !!(ortifiedUrl && embedMatch && embedMatch[1] && embedMatch[1].indexOf('ortified.ws') !== -1),
       title: title,
       year: year,
       url: pageUrl
