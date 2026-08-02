@@ -764,18 +764,24 @@
       Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + (best.year || '?') + ')');
 
       fetchJson(WORKER_URL + '/?kinogo_page=' + encodeURIComponent(best.url)).then(function(pageData) {
+        console.log('[iframe-cloud] Kinogo pageData:', JSON.stringify(pageData).substring(0, 300));
         if (pageData.embedUrl) {
           var embedUrl = pageData.embedUrl;
           if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
+          console.log('[iframe-cloud] Kinogo embedUrl:', embedUrl, 'isOrtified:', pageData.isOrtified);
 
           if (pageData.isOrtified) {
+            console.log('[iframe-cloud] Routing Kinogo → playOrtified');
             playOrtified(embedUrl, 'Kinogo \u2014 ' + (best.title || ''), best.title, function() {
+              console.log('[iframe-cloud] Kinogo playOrtified onFailure called');
               Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e');
             }, movie);
           } else {
+            console.log('[iframe-cloud] Routing Kinogo → playKinogoEmbed (cinemar)');
             playKinogoEmbed(embedUrl, best, movie);
           }
         } else {
+          console.log('[iframe-cloud] Kinogo embedUrl is null, pageData:', JSON.stringify(pageData));
           Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u043f\u043b\u0435\u0435\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
         }
       }).catch(function(e) {
@@ -918,17 +924,22 @@
   }
 
   function playOrtified(url, playerLabel, movieTitle, onFailure, movie) {
+    console.log('[iframe-cloud] playOrtified:', url.substring(0, 100), 'label:', playerLabel);
     Lampa.Noty.show(PLUGIN_NAME + ': \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 ' + playerLabel + '...');
 
     fetchOrtifiedViaProxies(url).then(function(html) {
+      console.log('[iframe-cloud] ortified HTML length:', html.length);
       var data = parseOrtifiedEmbed(html);
+      console.log('[iframe-cloud] ortified parsed:', 'seasons:', data.seasons.length, 'hls:', !!data.hlsUrl, 'audioNames:', data.audioNames.length);
 
       if (data.seasons.length > 0) {
         Lampa.Noty.show(PLUGIN_NAME + ': \u0441\u0435\u0440\u0438\u0430\u043b, ' + data.seasons.length + ' \u0441\u0435\u0437\u043e\u043d(\u043e\u0432)');
         showSeasonSelector(data.seasons, movieTitle, data.current, movie);
       } else if (data.hlsUrl) {
+        console.log('[iframe-cloud] ortified HLS:', data.hlsUrl.substring(0, 100));
         playHlsProxied(data.hlsUrl, movieTitle, movie, null, data.audioNames);
       } else {
+        console.log('[iframe-cloud] ortified no HLS found, html snippet:', html.substring(0, 200));
         Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c iframe...');
         showIframePlayer(url, playerLabel, onFailure);
       }
