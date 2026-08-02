@@ -1030,7 +1030,10 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       variantResp = await fetchViaVercel(firstVoice.url, 'https://cinemar.cc/');
       variantM3u8 = await variantResp.text();
     }
-    var variants = parseVariants(variantM3u8, firstVoice.proxyUrl);
+    // ===== ИСПРАВЛЕНИЕ: передаём workerBase в parseVariants =====
+    var workerBase = new URL(request.url).origin;
+    var variants = parseVariants(variantM3u8, workerBase, firstVoice.proxyUrl);
+    // =============================================================
 
     var lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
 
@@ -1069,7 +1072,8 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   }
 }
 
-function parseVariants(m3u8, baseProxyUrl) {
+// ===== ИСПРАВЛЕНИЕ: всегда оборачиваем варианты качества в прокси =====
+function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
   var lines = m3u8.split('\n');
   var variants = [];
   var bandwidthMap = { '240': 406000, '360': 696000, '480': 1328000, '720': 2892000, '1080': 5592000 };
@@ -1093,13 +1097,16 @@ function parseVariants(m3u8, baseProxyUrl) {
           var baseParts = baseProxyUrl.split('=');
           var originalBase = decodeURIComponent(baseParts[1] || '');
           var dir = originalBase.replace(/\/[^\/]*$/, '/');
-          fullUrl = baseParts[0] + '=' + encodeURIComponent(dir + nextLine);
+          fullUrl = dir + nextLine;
         }
+
+        // ВСЕГДА оборачиваем в прокси, даже абсолютные URL
+        var proxyUrl = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(fullUrl);
 
         variants.push({
           bandwidth: bw,
           resolution: res,
-          proxyUrl: fullUrl,
+          proxyUrl: proxyUrl,
           quality: qNum
         });
       }
@@ -1164,6 +1171,7 @@ async function handleKinogoStream(streamUrl, corsHeaders, request) {
   }
 }
 
+// ===== ИСПРАВЛЕНИЕ: всегда проксируем все сегменты, даже абсолютные URL =====
 function rewriteKinogoUrls(m3u8, baseUrl, workerOrigin) {
   var lines = m3u8.split('\n');
   var baseDir = baseUrl.replace(/\/[^\/]*$/, '/');
@@ -1178,6 +1186,7 @@ function rewriteKinogoUrls(m3u8, baseUrl, workerOrigin) {
       fullUrl = baseDir + line;
     }
 
+    // ВСЕГДА проксируем, даже абсолютные URL (Cinemar не отдаёт CORS)
     lines[i] = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(fullUrl);
   }
 
