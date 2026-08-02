@@ -29,6 +29,7 @@ export default {
     const kinogoMulti = url.searchParams.get('kinogo_multi');
     const kinogoStream = url.searchParams.get('kinogo_stream');
     const kinogoPage = url.searchParams.get('kinogo_page');
+    const collapsEmbed = url.searchParams.get('collaps_embed');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
     if (pathMatch) {
@@ -57,6 +58,10 @@ export default {
 
     if (kinogoSearch) {
       return await handleKinogoSearch(kinogoSearch, corsHeaders);
+    }
+
+    if (collapsEmbed) {
+      return await handleCollapsEmbed(collapsEmbed, corsHeaders);
     }
 
     if (straversUrl) {
@@ -153,6 +158,8 @@ async function handleStraversProxy(targetUrl, corsHeaders) {
   }
 }
 
+const KPU_TOKEN = '7edcf64b-b9aa-4f8b-8b5c-ef59bfe69a2c';
+
 async function handleKpuDebug(query, corsHeaders) {
   try {
     var resp = await fetch('https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword=' + encodeURIComponent(query) + '&page=1', {
@@ -167,6 +174,22 @@ async function handleKpuDebug(query, corsHeaders) {
       firstFilm: first
     }, null, 2), {
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+async function handleKpuProxy(targetUrl, corsHeaders) {
+  try {
+    var resp = await fetch(targetUrl, {
+      headers: { 'X-API-KEY': KPU_TOKEN, 'Accept': 'application/json' },
+      redirect: 'follow'
+    });
+    var data = await resp.text();
+    return new Response(data, {
+      status: resp.status,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
@@ -1256,4 +1279,36 @@ function rewriteKinogoUrls(m3u8, baseUrl, workerOrigin) {
   }
 
   return lines.join('\n');
+}
+
+async function handleCollapsEmbed(embedUrl, corsHeaders) {
+  try {
+    var referer = 'https://uakinogo.io/';
+    if (embedUrl.indexOf('cinemap.cc') !== -1) referer = 'https://cinemar.cc/';
+    else if (embedUrl.indexOf('cinemar.') !== -1) referer = 'https://cinemar.cc/';
+
+    var resp = await fetch(embedUrl, {
+      headers: { 'Referer': referer, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    var html = await resp.text();
+
+    var names = [];
+    var audioMatch = html.match(/audio\s*:\s*(\{[^}]+\})/);
+    if (audioMatch) {
+      try {
+        var audioObj = eval('(' + audioMatch[1] + ')');
+        if (audioObj && audioObj.names) {
+          names = audioObj.names.filter(function(n) { return n && n !== 'delete'; });
+        }
+      } catch(e) {}
+    }
+
+    return new Response(JSON.stringify({ names: names }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ names: [], error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
 }

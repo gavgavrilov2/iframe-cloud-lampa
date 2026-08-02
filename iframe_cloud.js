@@ -263,7 +263,7 @@
     return tracks;
   }
 
-  function playHlsProxied(hlsUrl, title, movie, label) {
+  function playHlsProxied(hlsUrl, title, movie, label, externalAudioNames) {
     var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
     console.log('[iframe-cloud] Playing proxied HLS:', proxyUrl.substring(0, 100));
 
@@ -274,7 +274,7 @@
         subtitles: [],
         translate: audioNames && audioNames.length ? {
           tracks: audioNames.map(function(t) {
-            return { language: t.name, label: '', extra: {} };
+            return { language: t.name || t, label: '', extra: {} };
           })
         } : undefined
       };
@@ -336,6 +336,12 @@
       }
     }
 
+    if (externalAudioNames && externalAudioNames.length) {
+      console.log('[iframe-cloud] Using external audio names:', externalAudioNames);
+      startPlay(externalAudioNames.map(function(n) { return { name: n }; }));
+      return;
+    }
+
     fetchText(proxyUrl).then(function(m3u8Text) {
       var tracks = parseM3u8AudioNames(m3u8Text);
       console.log('[iframe-cloud] Parsed audio tracks:', tracks.map(function(t) { return t.name; }));
@@ -377,10 +383,18 @@
   }
 
   function parseOrtifiedEmbed(html) {
-    var result = { seasons: [], hlsUrl: null, current: null };
+    var result = { seasons: [], hlsUrl: null, current: null, audioNames: [] };
 
     var mkMatch = html.match(/<script[^>]*data-name=["']mk["'][^>]*>([\s\S]*?)<\/script>/i);
-    if (!mkMatch) return result;
+    if (!mkMatch) {
+      var audioMatch = html.match(/"names"\s*:\s*\[([^\]]+)\]/);
+      if (audioMatch) {
+        try {
+          result.audioNames = JSON.parse('[' + audioMatch[1] + ']').filter(function(n) { return n && n !== 'delete'; });
+        } catch(e) {}
+      }
+      return result;
+    }
 
     var mkScript = mkMatch[1];
 
@@ -420,6 +434,13 @@
         result.hlsUrl = hlsMatch[1];
         console.log('[iframe-cloud] Parsed single HLS URL from ortified');
       }
+    }
+
+    var audioMatch = mkScript.match(/"names"\s*:\s*\[([^\]]+)\]/);
+    if (audioMatch && !result.audioNames.length) {
+      try {
+        result.audioNames = JSON.parse('[' + audioMatch[1] + ']').filter(function(n) { return n && n !== 'delete'; });
+      } catch(e) {}
     }
 
     return result;
@@ -899,7 +920,7 @@
         Lampa.Noty.show(PLUGIN_NAME + ': \u0441\u0435\u0440\u0438\u0430\u043b, ' + data.seasons.length + ' \u0441\u0435\u0437\u043e\u043d(\u043e\u0432)');
         showSeasonSelector(data.seasons, movieTitle, data.current, movie);
       } else if (data.hlsUrl) {
-        playHlsProxied(data.hlsUrl, movieTitle, movie);
+        playHlsProxied(data.hlsUrl, movieTitle, movie, null, data.audioNames);
       } else {
         Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c iframe...');
         showIframePlayer(url, playerLabel, onFailure);
