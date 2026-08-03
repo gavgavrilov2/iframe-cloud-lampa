@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.60.0');
+  console.log('[MovieZone] Loading v5.60.1');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -1491,16 +1491,18 @@
           getKinopoiskId(movie).then(function(kpId) {
             if (!kpId) {
               Lampa.Loading.stop();
-              Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID не найден');
+              Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
               return;
             }
-            playCollapsDirect(kpId, title, movie).catch(function(e) {
+            playCollapsDirect(kpId, title, movie).then(function() {
+              Lampa.Loading.stop();
+            }).catch(function(e) {
               Lampa.Loading.stop();
               Lampa.Noty.show(PLUGIN_NAME + ': Collaps \u2014 ' + e.message);
             });
           }).catch(function(e) {
             Lampa.Loading.stop();
-            Lampa.Noty.show(PLUGIN_NAME + ': ошибка поиска KP \u2014 ' + e.message);
+            Lampa.Noty.show(PLUGIN_NAME + ': \u043e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0438\u0441\u043a\u0430 KP \u2014 ' + e.message);
           });
         }
       },
