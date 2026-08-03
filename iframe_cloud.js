@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.60.0');
+  console.log('[MovieZone] Loading v5.50.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -976,7 +976,7 @@
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
-        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {} }; })
+        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {}; })
       } : undefined
     };
 
@@ -1445,62 +1445,18 @@
     var title = movie.title || movie.name || '';
     var tv = isTvSeries(movie);
 
-    var year = getYear(movie);
-    var label = title + (year ? ' (' + year + ')' : '');
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
-    var items = [
-      {
-        title: 'Kinogo',
-        subtitle: '1080p HLS \u2014 мульти-озвучка',
-        icon: '\uD83C\uDFA5',
-        _source: 'kinogo'
-      },
-      {
-        title: 'VK Video',
-        subtitle: 'до 4K MP4',
-        icon: '\uD83C\uDFA5',
-        _source: 'vk'
-      },
-      {
-        title: 'Collaps',
-        subtitle: '1080p DASH / 720p HLS',
-        icon: '\uD83C\uDFA5',
-        _source: 'collaps'
-      }
-    ];
-
-    Lampa.Select.show({
-      title: PLUGIN_NAME + ' \u2014 ' + label,
-      items: items,
-      onSelect: function(item) {
-        var source = item._source;
-
-        if (source === 'kinogo') {
-          searchAndPlayKinogo(movie);
-        } else if (source === 'vk') {
-          searchAndPlayVk(movie);
-        } else if (source === 'collaps') {
-          Lampa.Loading.start('MovieZone');
-          getKinopoiskId(movie).then(function(kpId) {
-            if (!kpId) {
-              Lampa.Loading.stop();
-              Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID не найден');
-              return;
-            }
-            playCollapsDirect(kpId, title, movie).catch(function(e) {
-              Lampa.Loading.stop();
-              Lampa.Noty.show(PLUGIN_NAME + ': Collaps \u2014 ' + e.message);
-            });
-          }).catch(function(e) {
-            Lampa.Loading.stop();
-            Lampa.Noty.show(PLUGIN_NAME + ': ошибка поиска KP \u2014 ' + e.message);
-          });
-        }
-      },
-      onBack: function() {
-        Lampa.Controller.toggle('content');
-      }
-    });
+    getKinopoiskId(movie)
+      .then(function(kpId) {
+        // Start auto-fallback chain
+        trySourceChain(movie, kpId);
+      })
+      .catch(function(e) {
+        console.log('[iframe-cloud] Error:', e.message);
+        // Fallback to Kinogo search
+        searchAndPlayKinogo(movie);
+      });
   }
 
   /* ---- Plugin registration ---- */
