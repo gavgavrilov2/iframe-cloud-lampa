@@ -30,6 +30,7 @@ export default {
     const kinogoStream = url.searchParams.get('kinogo_stream');
     const kinogoPage = url.searchParams.get('kinogo_page');
     const collapsEmbed = url.searchParams.get('collaps_embed');
+    const collapsDirect = url.searchParams.get('collaps_direct');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
     if (pathMatch) {
@@ -62,6 +63,10 @@ export default {
 
     if (collapsEmbed) {
       return await handleCollapsEmbed(collapsEmbed, corsHeaders);
+    }
+
+    if (collapsDirect) {
+      return await handleCollapsDirect(collapsDirect, corsHeaders);
     }
 
     if (straversUrl) {
@@ -1344,6 +1349,108 @@ async function handleCollapsEmbed(embedUrl, corsHeaders) {
     });
   } catch(e) {
     return new Response(JSON.stringify({ names: [], error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+function parseMakePlayer(html) {
+  var find = html.replace(/\n/g, '').match(/makePlayer\(\{([\s\S]*?)\}\);?/);
+  if (!find) return null;
+
+  var jsStr = find[1];
+
+  // Quote unquoted keys: word: → "word":
+  jsStr = jsStr.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
+
+  // Remove trailing commas before } or ]
+  jsStr = jsStr.replace(/,\s*([}\]])/g, '$1');
+
+  // Replace single quotes with double quotes for JSON
+  jsStr = jsStr.replace(/'/g, '"');
+
+  try {
+    return JSON.parse(jsStr);
+  } catch(e) {
+    return null;
+  }
+}
+
+async function handleCollapsDirect(kpId, corsHeaders) {
+  try {
+    var apiUrl = 'https://api.bhcesh.me/embed/kp/' + kpId;
+
+    var resp = await fetch(apiUrl, {
+      headers: {
+        'Origin': 'https://kinokrad.my',
+        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'cross-site'
+      }
+    });
+
+    if (!resp.ok) {
+      return new Response(JSON.stringify({ error: 'Collaps API returned ' + resp.status }), {
+        status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    var html = await resp.text();
+    var obj = parseMakePlayer(html);
+
+    if (!obj) {
+      return new Response(JSON.stringify({ error: 'Failed to parse makePlayer', html_length: html.length }), {
+        status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    var result = {
+      type: obj.seasons || (obj.playlist && obj.playlist.seasons) ? 'serial' : 'movie',
+      hls: obj.hls || null,
+      dash: obj.dash || obj.dasha || null,
+      audio: { names: [] },
+      cc: [],
+      qualityByWidth: obj.qualityByWidth || {},
+      seasons: null
+    };
+
+    // Extract audio names
+    if (obj.audio && obj.audio.names) {
+      result.audio.names = obj.audio.names.filter(function(n) { return n && n !== 'delete'; });
+    }
+
+    // Extract subtitles
+    if (obj.cc && Array.isArray(obj.cc)) {
+      result.cc = obj.cc.map(function(c) { return { name: c.name || '', url: c.url || '' }; }).filter(function(c) { return c.url; });
+    }
+
+    // Extract seasons for serials
+    if (result.type === 'serial') {
+      var seasons = (obj.playlist && obj.playlist.seasons) || obj.seasons || [];
+      result.seasons = seasons.map(function(season) {
+        return {
+          season: season.season,
+          episodes: (season.episodes || []).map(function(ep) {
+            return {
+              episode: ep.episode,
+              title: ep.title || '',
+              hls: ep.hls || null,
+              dash: ep.dash || ep.dasha || null,
+              audio: ep.audio && ep.audio.names ? ep.audio.names.filter(function(n) { return n && n !== 'delete'; }) : []
+            };
+          })
+        };
+      });
+    }
+
+    return new Response(JSON.stringify(result), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }

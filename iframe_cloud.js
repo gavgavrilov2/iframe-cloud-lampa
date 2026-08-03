@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.40.0');
+  console.log('[MovieZone] Loading v5.50.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -916,6 +916,152 @@
     });
   }
 
+  /* ---- Collaps Direct API: DASH 1080p ---- */
+
+  function playCollapsDirect(kpId, title, movie) {
+    return new Promise(function(resolve, reject) {
+      fetchJson(WORKER_URL + '/?collaps_direct=' + kpId).then(function(data) {
+        if (data.error) {
+          reject(new Error(data.error));
+          return;
+        }
+
+        var isTv = data.type === 'serial';
+        var audioNames = (data.audio && data.audio.names) || [];
+        var subtitles = (data.cc || []).map(function(c) {
+          return { label: c.name, url: c.url };
+        }).filter(function(s) { return s.url; });
+
+        if (isTv && data.seasons && data.seasons.length) {
+          var allEpisodes = [];
+          data.seasons.forEach(function(season) {
+            (season.episodes || []).forEach(function(ep) {
+              allEpisodes.push({
+                season: season.season,
+                episode: ep.episode,
+                title: ep.title || ('S' + season.season + 'E' + ep.episode),
+                url: ep.dash || ep.hls,
+                quality: ep.dash ? '1080p DASH' : '720p HLS',
+                audio: ep.audio && ep.audio.length ? ep.audio : audioNames
+              });
+            });
+          });
+
+          showCollapsEpisodeSelector(allEpisodes, title, movie, audioNames, subtitles);
+          resolve();
+          return;
+        }
+
+        var streamUrl = data.dash || data.hls;
+        if (!streamUrl) {
+          reject(new Error('No stream URL'));
+          return;
+        }
+
+        var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
+        playCollapsStream(streamUrl, qualityLabel, title, movie, audioNames, subtitles);
+        resolve();
+
+      }).catch(function(e) {
+        reject(e);
+      });
+    });
+  }
+
+  function playCollapsStream(url, qualityLabel, title, movie, audioNames, subtitles) {
+    var label = 'Collaps ' + qualityLabel;
+
+    var video = {
+      url: url,
+      title: PLUGIN_NAME + ' ' + label + ' — ' + title,
+      subtitles: subtitles.length ? subtitles : [],
+      translate: audioNames.length ? {
+        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {}; })
+      } : undefined
+    };
+
+    if (movie && (movie.id || movie.original_title || movie.title)) {
+      var hash = getTimelineHash(movie, 'Collaps');
+      var timeline = Lampa.Timeline.view(hash);
+      video.timeline = timeline;
+
+      var beholdHash = getBeholdHash(movie, 'Collaps');
+      markViewed(beholdHash);
+
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: 'Collaps'
+      };
+
+      addToHistory(movie);
+    }
+
+    Lampa.Player.play(video);
+    Lampa.Player.playlist([video]);
+
+    // Position save/restore
+    if (video.timeline) {
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          video.timeline.time = Math.round(el.currentTime);
+          video.timeline.duration = Math.round(el.duration);
+          video.timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(video.timeline);
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (video.timeline.time > 10 && el.duration && el.duration > video.timeline.time) {
+            el.currentTime = video.timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(video.timeline.time / 60) + ':' + String(Math.floor(video.timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
+    }
+  }
+
+  function showCollapsEpisodeSelector(episodes, title, movie, audioNames, subtitles) {
+    var items = episodes.map(function(ep) {
+      return {
+        title: ep.title,
+        subtitle: ep.quality + ' — ' + (ep.audio.length ? ep.audio.join(', ') : ''),
+        _episode: ep
+      };
+    });
+
+    Lampa.Select.show({
+      title: title + ' — Collaps',
+      items: items,
+      onSelect: function(item) {
+        var ep = item._episode;
+        if (ep.url) {
+          playCollapsStream(ep.url, ep.quality, title, movie, ep.audio.length ? ep.audio : audioNames, subtitles);
+        } else {
+          Lampa.Noty.show(PLUGIN_NAME + ': серия недоступна');
+        }
+      },
+      onBack: function() {
+        Lampa.Controller.toggle('content');
+      }
+    });
+  }
+
   /* ---- playIframeCloud: try to play all sources natively ---- */
 
   function tryFindM3u8InHtml(html) {
@@ -1161,6 +1307,138 @@
     }
   }
 
+  /* ---- Auto-fallback chain: Kinogo → VK → Collaps ---- */
+
+  function trySourceChain(movie, kpId) {
+    var title = movie.title || movie.name || '';
+    var tv = isTvSeries(movie);
+
+    var sources = [];
+
+    // 1. Kinogo — 1080p HLS with multi-voice
+    sources.push({
+      name: 'Kinogo',
+      try: function(done) {
+        fetchJson(WORKER_URL + '/?kinogo_search=' + encodeURIComponent(title)).then(function(data) {
+          var results = data.results || [];
+          if (!results.length) { done(false); return; }
+
+          var year = getYear(movie);
+          var best = null;
+          for (var i = 0; i < results.length; i++) {
+            if (year && results[i].year && Math.abs(parseInt(results[i].year) - parseInt(year)) <= 1) {
+              best = results[i];
+              break;
+            }
+          }
+          if (!best) best = results[0];
+
+          fetchJson(WORKER_URL + '/?kinogo_page=' + encodeURIComponent(best.url)).then(function(pageData) {
+            if (!pageData.embedUrl) { done(false); return; }
+
+            var embedUrl = pageData.embedUrl;
+            if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
+
+            if (pageData.hasCinemar && !pageData.isOrtified) {
+              playKinogoEmbed(embedUrl, best, movie);
+              done(true);
+            } else if (pageData.isOrtified) {
+              // ortified is a fallback, skip in auto mode
+              done(false);
+            } else {
+              playKinogoEmbed(embedUrl, best, movie);
+              done(true);
+            }
+          }).catch(function() { done(false); });
+        }).catch(function() { done(false); });
+      }
+    });
+
+    // 2. VK Video — up to 4K MP4 (skip for TV series)
+    if (!tv) {
+      sources.push({
+        name: 'VK Video',
+        try: function(done) {
+          var year = getYear(movie);
+          var query = title + (year ? ' ' + year : '');
+
+          fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
+            var videos = data.videos || [];
+            if (!videos.length) { done(false); return; }
+
+            var best = videos[0];
+            var infoUrl = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id;
+
+            fetchJson(infoUrl).then(function(info) {
+              var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
+              if (!mp4Qualities.length) { done(false); return; }
+
+              var bestQuality = mp4Qualities[0];
+
+              var play = {
+                url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
+                title: PLUGIN_NAME + ' VK ' + bestQuality + 'p — ' + best.title,
+                subtitles: []
+              };
+
+              if (mp4Qualities.length > 1) {
+                play.quality = {};
+                var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p' };
+                for (var i = 0; i < mp4Qualities.length; i++) {
+                  var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
+                  play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
+                }
+              }
+
+              var hash = getTimelineHash(movie, 'VK');
+              var timeline = Lampa.Timeline.view(hash);
+              play.timeline = timeline;
+
+              addToHistory(movie);
+              Lampa.Player.play(play);
+              Lampa.Player.playlist([play]);
+              done(true);
+            }).catch(function() { done(false); });
+          }).catch(function() { done(false); });
+        }
+      });
+    }
+
+    // 3. Collaps Direct — 1080p DASH
+    sources.push({
+      name: 'Collaps',
+      try: function(done) {
+        if (!kpId) { done(false); return; }
+        playCollapsDirect(kpId, title, movie).then(function() {
+          done(true);
+        }).catch(function() { done(false); });
+      }
+    });
+
+    // Try each source sequentially
+    tryNextSource(sources, 0);
+
+    function tryNextSource(list, idx) {
+      if (idx >= list.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': все источники недоступны');
+        return;
+      }
+
+      var src = list[idx];
+
+      src.try(function(success) {
+        if (success) return; // playback started
+
+        // Show notification only if there's a next source
+        if (idx < list.length - 1) {
+          Lampa.Noty.show(PLUGIN_NAME + ': ' + src.name + ' недоступен, пробуем ' + list[idx + 1].name + '...');
+        }
+
+        tryNextSource(list, idx + 1);
+      });
+    }
+  }
+
   function openPlugin(movie) {
     var id = movie.id;
     if (!id) { Lampa.Noty.show(PLUGIN_NAME + ': нет ID'); return; }
@@ -1171,97 +1449,12 @@
 
     getKinopoiskId(movie)
       .then(function(kpId) {
-        if (!kpId) {
-          searchAndPlayKinogo(movie);
-          return;
-        }
-
-
-        return getPlayersWithRetry(kpId, id).then(function(players) {
-          players = players.filter(function(p) { return !isVeoveo(p) && !isAllohaOrTurbo(p); });
-
-          if (!players.length) {
-            searchAndPlayKinogo(movie);
-            return;
-          }
-
-          var items = [];
-
-          items.push({
-            title: PLUGIN_NAME + ' Kinogo — ' + title,
-            subtitle: '1080p HLS \u043e\u0437\u0432\u0443\u0447\u043a\u0438',
-            _kinogo: true,
-            _movie: movie
-          });
-
-          items = items.concat(players.map(function(p, i) {
-            return {
-              title: p.source + ' — ' + (p.translate || ''),
-              subtitle: (p.quality || ''),
-              _player: p, _index: i
-            };
-          }));
-
-          if (!tv) {
-            items.push({
-              title: PLUGIN_NAME + ' VK — ' + title,
-              subtitle: '2160p-4K MP4',
-              _vk: true,
-              _movie: movie
-            });
-          }
-
-          items.push({
-            title: '\ud83c\udf10 Все источники',
-            subtitle: PLUGIN_NAME,
-            _browser: true,
-            _cloudUrl: IFRAME_CLOUD_BASE + kpId
-          });
-
-          Lampa.Select.show({
-            title: title,
-            items: items,
-            onSelect: function(item) {
-              if (item._kinogo) {
-                searchAndPlayKinogo(item._movie);
-                return;
-              }
-
-              if (item._vk) {
-                searchAndPlayVk(item._movie);
-                return;
-              }
-
-              if (item._fanfilm) {
-                searchAndPlayFanfilm(item._movie);
-                return;
-              }
-
-              if (item._browser) {
-                playIframeCloud(item._cloudUrl, title, movie);
-                return;
-              }
-
-              addToHistory(movie);
-
-              var p = item._player;
-              var pLabel = p.source + ' (' + (p.translate || '') + ')';
-
-              var isOrt = (p.url || '').indexOf('ortified.ws') !== -1;
-
-              if (isOrt) {
-                playOrtified(p.url, pLabel, title, function() {
-                  tryNextPlayer(players, item._index, title);
-                }, movie);
-              } else {
-                showIframePlayer(p.url, pLabel);
-              }
-            }
-          });
-        });
+        // Start auto-fallback chain
+        trySourceChain(movie, kpId);
       })
       .catch(function(e) {
         console.log('[iframe-cloud] Error:', e.message);
+        // Fallback to Kinogo search
         searchAndPlayKinogo(movie);
       });
   }
