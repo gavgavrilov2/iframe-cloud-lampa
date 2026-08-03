@@ -31,6 +31,7 @@ export default {
     const kinogoPage = url.searchParams.get('kinogo_page');
     const collapsEmbed = url.searchParams.get('collaps_embed');
     const collapsDirect = url.searchParams.get('collaps_direct');
+    const collapsStream = url.searchParams.get('collaps_stream');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
     if (pathMatch) {
@@ -67,6 +68,10 @@ export default {
 
     if (collapsDirect) {
       return await handleCollapsDirect(collapsDirect, corsHeaders);
+    }
+
+    if (collapsStream) {
+      return await handleCollapsStream(collapsStream, corsHeaders, request);
     }
 
     if (straversUrl) {
@@ -1320,6 +1325,66 @@ function rewriteKinogoUrls(m3u8, baseUrl, workerOrigin) {
   }
 
   return lines.join('\n');
+}
+
+async function handleCollapsStream(streamUrl, corsHeaders, request) {
+  try {
+    var decodedUrl = streamUrl;
+    try { decodedUrl = decodeURIComponent(decodedUrl); } catch(e) {}
+    if (decodedUrl.indexOf('http') !== 0) decodedUrl = 'https:' + decodedUrl;
+
+    var reqHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Referer': 'https://kinokrad.my',
+      'Origin': 'https://kinokrad.my'
+    };
+    if (request && request.headers) {
+      var range = request.headers.get('Range');
+      if (range) reqHeaders['Range'] = range;
+    }
+
+    var resp = await fetch(decodedUrl, { headers: reqHeaders, redirect: 'follow' });
+    var respHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Range'
+    };
+
+    var ct = resp.headers.get('Content-Type');
+    var isM3u8 = ct && ct.indexOf('mpegurl') !== -1;
+    if (!isM3u8 && decodedUrl.indexOf('.m3u8') !== -1) isM3u8 = true;
+    respHeaders['Content-Type'] = ct || 'video/mp4';
+
+    var cl = resp.headers.get('Content-Length');
+    if (cl) respHeaders['Content-Length'] = cl;
+    var cr = resp.headers.get('Content-Range');
+    if (cr) respHeaders['Content-Range'] = cr;
+    var ar = resp.headers.get('Accept-Ranges');
+    if (ar) respHeaders['Accept-Ranges'] = ar;
+
+    if (isM3u8) {
+      var body = await resp.text();
+      var workerOrigin = new URL(request.url).origin;
+      var lines = body.split('\n');
+      var baseDir = decodedUrl.replace(/\/[^\/]*$/, '/');
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line || line.startsWith('#') || line.indexOf('collaps_stream=') !== -1) continue;
+        var fullUrl = line;
+        if (line.indexOf('http') !== 0) {
+          if (line.indexOf('./') === 0) line = line.substring(2);
+          fullUrl = baseDir + line;
+        }
+        lines[i] = workerOrigin + '/?collaps_stream=' + encodeURIComponent(fullUrl);
+      }
+      return new Response(lines.join('\n'), { status: resp.status, headers: respHeaders });
+    }
+
+    return new Response(resp.body, { status: resp.status, headers: respHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
 }
 
 async function handleCollapsEmbed(embedUrl, corsHeaders) {

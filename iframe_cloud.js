@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.60.2');
+  console.log('[MovieZone] Loading v5.70.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -769,9 +769,6 @@
   }
 
   function playKinogoEmbed(embedUrl, result, movie) {
-    var multiUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
-
-
     var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
 
     fetchJson(infoUrl).then(function(info) {
@@ -780,7 +777,16 @@
         return { language: t.name, label: '', extra: {} };
       });
 
-      var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : (info.directM3u8 || multiUrl);
+      var firstTrack = (info.tracks && info.tracks[0]);
+      var voiceUrl = firstTrack && firstTrack.file;
+      if (voiceUrl) {
+        if (voiceUrl.indexOf('//') === 0) voiceUrl = 'https:' + voiceUrl;
+        try { voiceUrl = decodeURIComponent(voiceUrl); } catch(e) {}
+      }
+
+      var videoUrl = voiceUrl
+        ? WORKER_URL + '/?kinogo_stream=' + encodeURIComponent(voiceUrl)
+        : (info.directM3u8 || (WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8'));
 
       var play = {
         url: videoUrl,
@@ -789,7 +795,7 @@
         translate: tracks.length ? { tracks: tracks } : undefined
       };
 
-      var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
+      var firstSubs = (firstTrack && firstTrack.subtitles) || '';
       if (firstSubs) {
         play.subtitles = parseSubtitles(firstSubs);
       }
@@ -813,37 +819,8 @@
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
 
-      setTimeout(function() {
-        var el = document.querySelector('video');
-        if (!el) return;
-
-        var lastSave = 0;
-        var savePos = function() {
-          var now = Date.now();
-          if (now - lastSave < 3000) return;
-          if (!el.duration || el.duration < 10) return;
-          lastSave = now;
-          timeline.time = Math.round(el.currentTime);
-          timeline.duration = Math.round(el.duration);
-          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-          Lampa.Timeline.update(timeline);
-        };
-
-        el.addEventListener('timeupdate', savePos);
-        el.addEventListener('pause', savePos);
-        el.addEventListener('ended', savePos);
-
-        var doRestore = function() {
-          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-            el.currentTime = timeline.time;
-            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-          }
-        };
-
-        if (el.readyState >= 1) doRestore();
-        else el.addEventListener('loadedmetadata', doRestore);
-      }, 1500);
-
+      setupPlayerBack();
+      setupPositionSave(timeline);
     }).catch(function(e) {
       console.log('[iframe-cloud] Kinogo info error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
@@ -919,7 +896,7 @@
   /* ---- Collaps Direct API: HLS 720p + DASH 1080p (via proxy) ---- */
 
   function collapseProxy(url) {
-    return VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
+    return WORKER_URL + '/?collaps_stream=' + encodeURIComponent(url);
   }
 
   function setupPositionSave(timeline) {
@@ -964,9 +941,10 @@
       }
     };
     document.addEventListener('keydown', handler);
-    setTimeout(function() {
+    window.addEventListener('hashchange', function onHash() {
       document.removeEventListener('keydown', handler);
-    }, 30000);
+      window.removeEventListener('hashchange', onHash);
+    });
   }
 
   function playCollapsDirect(kpId, title, movie) {
