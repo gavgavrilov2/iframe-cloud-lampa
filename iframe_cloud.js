@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.73.0');
+  console.log('[MovieZone] Loading v5.74.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -932,11 +932,30 @@
         try { Lampa.Controller.toggle('content'); } catch (err) {}
       }
     };
+    
     document.addEventListener('keydown', handler);
-    window.addEventListener('hashchange', function onHash() {
-      document.removeEventListener('keydown', handler);
-      window.removeEventListener('hashchange', onHash);
-    });
+    
+    var cleanupHandler = function() {
+      if (location.hash.includes('content') || !location.hash) {
+        document.removeEventListener('keydown', handler);
+        window.removeEventListener('hashchange', cleanupHandler);
+      }
+    };
+    
+    window.addEventListener('hashchange', cleanupHandler);
+  }
+    };
+    
+    document.addEventListener('keydown', handler);
+    
+    var cleanupHandler = function() {
+      if (location.hash.includes('content') || !location.hash) {
+        document.removeEventListener('keydown', handler);
+        window.removeEventListener('hashchange', cleanupHandler);
+      }
+    };
+    
+    window.addEventListener('hashchange', cleanupHandler);
   }
 
   function playCollapsDirect(kpId, title, movie) {
