@@ -1,7 +1,8 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.75.0');
+  console.log('[MovieZone] Loading v5.60.1');
+  console.log('[MovieZone] Loading v5.60.2');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -585,41 +586,20 @@
 
   /* ---- VK Video search ---- */
 
-  function setupVkTimeline(play, movie) {
-    var hash = getTimelineHash(movie, 'VK');
-    var timeline = Lampa.Timeline.view(hash);
-    play.timeline = timeline;
-
-    var beholdHash = getBeholdHash(movie, 'VK');
-    markViewed(beholdHash);
-
-    window._iframe_cloud_current = {
-      timeline: timeline,
-      beholdHash: beholdHash,
-      movie: movie,
-      label: 'VK'
-    };
-
-    addToHistory(movie);
-    return timeline;
-  }
-
   function searchAndPlayVk(movie) {
-    return new Promise(function(resolve, reject) {
-      var title = movie.title || movie.original_title || movie.name || '';
-      var year = getYear(movie);
-      var query = title + (year ? ' ' + year : '');
+    var title = movie.title || movie.original_title || movie.name || '';
+    var year = getYear(movie);
+    var query = title + (year ? ' ' + year : '');
 
-      Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
+    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
-      fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
-        var videos = data.videos || [];
+    fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
+      var videos = data.videos || [];
 
-        if (!videos.length) {
-          Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
-          reject(new Error('No VK videos'));
-          return;
-        }
+      if (!videos.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+        return;
+      }
 
       var best = videos[0];
 
@@ -636,51 +616,7 @@
         var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
         var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
 
-        // Use HLS master playlist if available for smooth quality switching
-        if (info.hls) {
-          var hlsUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(info.hls);
 
-          Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p HLS)');
-
-          // Fetch HLS playlist to extract audio track names
-          fetchText(hlsUrl).then(function(m3u8Text) {
-            var hlsTracks = parseM3u8AudioNames(m3u8Text);
-
-            var play = {
-              url: hlsUrl,
-              title: PLUGIN_NAME + ' VK HLS — ' + best.title,
-              subtitles: [],
-              translate: hlsTracks.length ? {
-                tracks: hlsTracks.map(function(t) { return { language: t.name, label: '', extra: {} }; })
-              } : undefined
-            };
-
-            setupVkTimeline(play, movie);
-
-            Lampa.Player.play(play);
-            Lampa.Player.playlist([play]);
-            setupPlayerBack();
-            setupPositionSave(play.timeline);
-            resolve();
-          }).catch(function() {
-            // Fallback: play HLS without extracted tracks
-            var play = {
-              url: hlsUrl,
-              title: PLUGIN_NAME + ' VK HLS — ' + best.title,
-              subtitles: [],
-              translate: undefined
-            };
-            setupVkTimeline(play, movie);
-            Lampa.Player.play(play);
-            Lampa.Player.playlist([play]);
-            setupPlayerBack();
-            setupPositionSave(play.timeline);
-            resolve();
-          });
-          return;
-        }
-
-        // Fallback: use MP4 files with quality switching
         Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
         var qualityLabel = mp4Qualities.length > 1 ? mp4Qualities[mp4Qualities.length - 1] + 'p-' + mp4Qualities[0] + 'p' : bestQuality + 'p';
@@ -691,17 +627,31 @@
           subtitles: []
         };
 
-        if (mp4Qualities.length > 1) {
+        if (mp4Qualities.length > 1 || info.hls) {
           play.quality = {};
           var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p', 240: '240p' };
           for (var i = 0; i < mp4Qualities.length; i++) {
             var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
             play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
           }
+
         }
 
-        setupVkTimeline(play, movie);
-        var timeline = play.timeline;
+        var hash = getTimelineHash(movie, 'VK');
+        var timeline = Lampa.Timeline.view(hash);
+        play.timeline = timeline;
+
+        var beholdHash = getBeholdHash(movie, 'VK');
+        markViewed(beholdHash);
+
+        window._iframe_cloud_current = {
+          timeline: timeline,
+          beholdHash: beholdHash,
+          movie: movie,
+          label: 'VK'
+        };
+
+        addToHistory(movie);
 
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
@@ -737,21 +687,14 @@
           else el.addEventListener('loadedmetadata', doRestore);
         }, 1500);
 
-        setupPlayerBack();
-        setupPositionSave(timeline);
-        resolve();
-
       }).catch(function(e) {
         console.log('[iframe-cloud] VK info error:', e.message);
         Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
-        reject(e);
       });
 
     }).catch(function(e) {
       console.log('[iframe-cloud] VK search error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
-      reject(e);
-    });
     });
   }
 
@@ -828,6 +771,8 @@
 
   function playKinogoEmbed(embedUrl, result, movie) {
     var multiUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
+
+
     var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
 
     fetchJson(infoUrl).then(function(info) {
@@ -869,8 +814,37 @@
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
 
-      setupPlayerBack();
-      setupPositionSave(timeline);
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          timeline.time = Math.round(el.currentTime);
+          timeline.duration = Math.round(el.duration);
+          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(timeline);
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+            el.currentTime = timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
+
     }).catch(function(e) {
       console.log('[iframe-cloud] Kinogo info error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
@@ -990,17 +964,10 @@
         try { Lampa.Controller.toggle('content'); } catch (err) {}
       }
     };
-    
     document.addEventListener('keydown', handler);
-    
-    var cleanupHandler = function() {
-      if (location.hash.includes('content') || !location.hash) {
-        document.removeEventListener('keydown', handler);
-        window.removeEventListener('hashchange', cleanupHandler);
-      }
-    };
-    
-    window.addEventListener('hashchange', cleanupHandler);
+    setTimeout(function() {
+      document.removeEventListener('keydown', handler);
+    }, 30000);
   }
 
   function playCollapsDirect(kpId, title, movie) {
@@ -1089,6 +1056,39 @@
     Lampa.Player.play(video);
     Lampa.Player.playlist([video]);
 
+    // Position save/restore
+    if (video.timeline) {
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
+
+        var lastSave = 0;
+        var savePos = function() {
+          var now = Date.now();
+          if (now - lastSave < 3000) return;
+          if (!el.duration || el.duration < 10) return;
+          lastSave = now;
+          video.timeline.time = Math.round(el.currentTime);
+          video.timeline.duration = Math.round(el.duration);
+          video.timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+          Lampa.Timeline.update(video.timeline);
+        };
+
+        el.addEventListener('timeupdate', savePos);
+        el.addEventListener('pause', savePos);
+        el.addEventListener('ended', savePos);
+
+        var doRestore = function() {
+          if (video.timeline.time > 10 && el.duration && el.duration > video.timeline.time) {
+            el.currentTime = video.timeline.time;
+            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(video.timeline.time / 60) + ':' + String(Math.floor(video.timeline.time % 60)).padStart(2, '0'));
+          }
+        };
+
+        if (el.readyState >= 1) doRestore();
+        else el.addEventListener('loadedmetadata', doRestore);
+      }, 1500);
+    }
     setupPlayerBack();
     setupPositionSave(video.timeline);
   }
@@ -1411,13 +1411,51 @@
       }
     });
 
-    // 2. VK Video — HLS + MP4 quality switching
+    // 2. VK Video — up to 4K MP4 (skip for TV series)
     if (!tv) {
       sources.push({
         name: 'VK Video',
         try: function(done) {
-          searchAndPlayVk(movie).then(function() {
-            done(true);
+          var year = getYear(movie);
+          var query = title + (year ? ' ' + year : '');
+
+          fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
+            var videos = data.videos || [];
+            if (!videos.length) { done(false); return; }
+
+            var best = videos[0];
+            var infoUrl = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id;
+
+            fetchJson(infoUrl).then(function(info) {
+              var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
+              if (!mp4Qualities.length) { done(false); return; }
+
+              var bestQuality = mp4Qualities[0];
+
+              var play = {
+                url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
+                title: PLUGIN_NAME + ' VK ' + bestQuality + 'p — ' + best.title,
+                subtitles: []
+              };
+
+              if (mp4Qualities.length > 1) {
+                play.quality = {};
+                var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p' };
+                for (var i = 0; i < mp4Qualities.length; i++) {
+                  var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
+                  play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
+                }
+              }
+
+              var hash = getTimelineHash(movie, 'VK');
+              var timeline = Lampa.Timeline.view(hash);
+              play.timeline = timeline;
+
+              addToHistory(movie);
+              Lampa.Player.play(play);
+              Lampa.Player.playlist([play]);
+              done(true);
+            }).catch(function() { done(false); });
           }).catch(function() { done(false); });
         }
       });
