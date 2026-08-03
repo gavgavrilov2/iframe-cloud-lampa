@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.74.0');
+  console.log('[MovieZone] Loading v5.75.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -585,8 +585,6 @@
 
   /* ---- VK Video search ---- */
 
-  /* ---- VK Video search ---- */
-
   function setupVkTimeline(play, movie) {
     var hash = getTimelineHash(movie, 'VK');
     var timeline = Lampa.Timeline.view(hash);
@@ -607,19 +605,21 @@
   }
 
   function searchAndPlayVk(movie) {
-    var title = movie.title || movie.original_title || movie.name || '';
-    var year = getYear(movie);
-    var query = title + (year ? ' ' + year : '');
+    return new Promise(function(resolve, reject) {
+      var title = movie.title || movie.original_title || movie.name || '';
+      var year = getYear(movie);
+      var query = title + (year ? ' ' + year : '');
 
-    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
+      Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
-    fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
-      var videos = data.videos || [];
+      fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
+        var videos = data.videos || [];
 
-      if (!videos.length) {
-        Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
-        return;
-      }
+        if (!videos.length) {
+          Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
+          reject(new Error('No VK videos'));
+          return;
+        }
 
       var best = videos[0];
 
@@ -661,6 +661,7 @@
             Lampa.Player.playlist([play]);
             setupPlayerBack();
             setupPositionSave(play.timeline);
+            resolve();
           }).catch(function() {
             // Fallback: play HLS without extracted tracks
             var play = {
@@ -674,6 +675,7 @@
             Lampa.Player.playlist([play]);
             setupPlayerBack();
             setupPositionSave(play.timeline);
+            resolve();
           });
           return;
         }
@@ -737,15 +739,19 @@
 
         setupPlayerBack();
         setupPositionSave(timeline);
+        resolve();
 
       }).catch(function(e) {
         console.log('[iframe-cloud] VK info error:', e.message);
         Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
+        reject(e);
       });
 
     }).catch(function(e) {
       console.log('[iframe-cloud] VK search error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
+      reject(e);
+    });
     });
   }
 
@@ -1405,51 +1411,13 @@
       }
     });
 
-    // 2. VK Video — up to 4K MP4 (skip for TV series)
+    // 2. VK Video — HLS + MP4 quality switching
     if (!tv) {
       sources.push({
         name: 'VK Video',
         try: function(done) {
-          var year = getYear(movie);
-          var query = title + (year ? ' ' + year : '');
-
-          fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
-            var videos = data.videos || [];
-            if (!videos.length) { done(false); return; }
-
-            var best = videos[0];
-            var infoUrl = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id;
-
-            fetchJson(infoUrl).then(function(info) {
-              var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
-              if (!mp4Qualities.length) { done(false); return; }
-
-              var bestQuality = mp4Qualities[0];
-
-              var play = {
-                url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
-                title: PLUGIN_NAME + ' VK ' + bestQuality + 'p — ' + best.title,
-                subtitles: []
-              };
-
-              if (mp4Qualities.length > 1) {
-                play.quality = {};
-                var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p' };
-                for (var i = 0; i < mp4Qualities.length; i++) {
-                  var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
-                  play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
-                }
-              }
-
-              var hash = getTimelineHash(movie, 'VK');
-              var timeline = Lampa.Timeline.view(hash);
-              play.timeline = timeline;
-
-              addToHistory(movie);
-              Lampa.Player.play(play);
-              Lampa.Player.playlist([play]);
-              done(true);
-            }).catch(function() { done(false); });
+          searchAndPlayVk(movie).then(function() {
+            done(true);
           }).catch(function() { done(false); });
         }
       });

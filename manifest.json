@@ -1,8 +1,8 @@
 {
   "type": "video",
-  "version": "5.74.0",
+  "version": "5.75.0",
   "name": "MovieZone",
-  "description": "VK Video + Collaps 1080p + Kinogo — menu selection",
+  "description": "VK HLS + MP4 quality switching, Collaps back button, Kinogo multi-voice",
   "component": "iframe_cloud",
   "icon": "assets/icon.png"
-}
+}\n
