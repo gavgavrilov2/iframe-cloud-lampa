@@ -1081,7 +1081,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var workerOrigin = new URL(request.url).origin;
+    var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
 
     var embedResult = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
     var html = embedResult.text;
@@ -1122,15 +1122,10 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
-    var reqHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Referer': 'https://cinemar.cc/',
-      'Origin': 'https://cinemar.cc'
-    };
-    var variantResp = await fetch(voices[0].url, { headers: reqHeaders, redirect: 'follow' });
+    var firstMasterVercel = vercelBase + encodeURIComponent(voices[0].url);
+    var variantResp = await fetch(firstMasterVercel);
     var variantM3u8 = await variantResp.text();
-    var variants = parseVariantsFromM3u8(variantM3u8, voices[0].url);
+    var variants = parseVariantsFromM3u8(variantM3u8);
 
     var voiceSuffixes = [''];
     for (var v = 1; v < voices.length; v++) {
@@ -1156,16 +1151,14 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       var voice = voices[v];
       var defaultAttr = v === 0 ? ',DEFAULT=YES' : '';
       var autoSelect = v === 0 ? ',AUTOSELECT=YES' : '';
-      var audioOriginalUrl = audioVariant.url.replace(/\.m3u8$/, voiceSuffixes[v] + '.m3u8');
-      var audioStreamUrl = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(audioOriginalUrl);
-      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioStreamUrl + '",NAME="' + voice.name + '"');
+      var audioUrl = replaceVariantSuffix(audioVariant.url, voiceSuffixes[v]);
+      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
     }
 
     for (var q = 0; q < variants.length; q++) {
       var variant = variants[q];
-      var variantStreamUrl = workerOrigin + '/?kinogo_stream=' + encodeURIComponent(variant.url);
       lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + ',CODECS="avc1.4d401f,mp4a.40.2",AUDIO="audio"');
-      lines.push(variantStreamUrl);
+      lines.push(variant.url);
     }
 
     lines.push('#EXT-X-ENDLIST');
@@ -1185,27 +1178,22 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   }
 }
 
-function parseVariantsFromM3u8(m3u8, baseUrl) {
+function parseVariantsFromM3u8(m3u8) {
   var lines = m3u8.split('\n');
   var variants = [];
-  var baseDir = baseUrl ? baseUrl.replace(/\/[^\/]*$/, '/') : '';
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
     if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
       var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
       if (!nextLine || nextLine.indexOf('#') === 0) continue;
-      var fullUrl = nextLine;
-      if (nextLine.indexOf('http') !== 0) {
-        if (!baseDir) continue;
-        fullUrl = baseDir + nextLine;
-      }
+      if (nextLine.indexOf('http') !== 0) continue;
       var bwMatch = line.match(/BANDWIDTH=(\d+)/);
       var bw = bwMatch ? parseInt(bwMatch[1]) : 1000000;
       var resMatch = line.match(/RESOLUTION=(\d+x\d+)/);
       var res = resMatch ? resMatch[1] : '1280x720';
-      var quality = fullUrl.match(/\.(\d+)\.mp4/);
+      var quality = nextLine.match(/\.(\d+)\.mp4/);
       var qNum = quality ? parseInt(quality[1]) : 0;
-      variants.push({ bandwidth: bw, resolution: res, url: fullUrl, quality: qNum });
+      variants.push({ bandwidth: bw, resolution: res, url: nextLine, quality: qNum });
     }
   }
   variants.sort(function(a, b) { return b.quality - a.quality; });
@@ -1216,10 +1204,10 @@ function replaceVariantSuffix(url, newSuffix) {
   var match = url.match(/url=([^&]+)/);
   if (match) {
     var originalUrl = decodeURIComponent(match[1]);
-    originalUrl = originalUrl.replace(/\.m3u8$/, newSuffix + '.m3u8');
+    originalUrl = originalUrl.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
     return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
   }
-  return url.replace(/\.m3u8$/, newSuffix + '.m3u8');
+  return url.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
 }
 
 function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
