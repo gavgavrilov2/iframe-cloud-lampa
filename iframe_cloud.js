@@ -585,6 +585,27 @@
 
   /* ---- VK Video search ---- */
 
+  /* ---- VK Video search ---- */
+
+  function setupVkTimeline(play, movie) {
+    var hash = getTimelineHash(movie, 'VK');
+    var timeline = Lampa.Timeline.view(hash);
+    play.timeline = timeline;
+
+    var beholdHash = getBeholdHash(movie, 'VK');
+    markViewed(beholdHash);
+
+    window._iframe_cloud_current = {
+      timeline: timeline,
+      beholdHash: beholdHash,
+      movie: movie,
+      label: 'VK'
+    };
+
+    addToHistory(movie);
+    return timeline;
+  }
+
   function searchAndPlayVk(movie) {
     var title = movie.title || movie.original_title || movie.name || '';
     var year = getYear(movie);
@@ -615,7 +636,49 @@
         var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
         var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
 
+        // Use HLS master playlist if available for smooth quality switching
+        if (info.hls) {
+          var hlsUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(info.hls);
 
+          Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p HLS)');
+
+          // Fetch HLS playlist to extract audio track names
+          fetchText(hlsUrl).then(function(m3u8Text) {
+            var hlsTracks = parseM3u8AudioNames(m3u8Text);
+
+            var play = {
+              url: hlsUrl,
+              title: PLUGIN_NAME + ' VK HLS — ' + best.title,
+              subtitles: [],
+              translate: hlsTracks.length ? {
+                tracks: hlsTracks.map(function(t) { return { language: t.name, label: '', extra: {} }; })
+              } : undefined
+            };
+
+            setupVkTimeline(play, movie);
+
+            Lampa.Player.play(play);
+            Lampa.Player.playlist([play]);
+            setupPlayerBack();
+            setupPositionSave(play.timeline);
+          }).catch(function() {
+            // Fallback: play HLS without extracted tracks
+            var play = {
+              url: hlsUrl,
+              title: PLUGIN_NAME + ' VK HLS — ' + best.title,
+              subtitles: [],
+              translate: undefined
+            };
+            setupVkTimeline(play, movie);
+            Lampa.Player.play(play);
+            Lampa.Player.playlist([play]);
+            setupPlayerBack();
+            setupPositionSave(play.timeline);
+          });
+          return;
+        }
+
+        // Fallback: use MP4 files with quality switching
         Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
 
         var qualityLabel = mp4Qualities.length > 1 ? mp4Qualities[mp4Qualities.length - 1] + 'p-' + mp4Qualities[0] + 'p' : bestQuality + 'p';
@@ -626,31 +689,17 @@
           subtitles: []
         };
 
-        if (mp4Qualities.length > 1 || info.hls) {
+        if (mp4Qualities.length > 1) {
           play.quality = {};
           var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p', 240: '240p' };
           for (var i = 0; i < mp4Qualities.length; i++) {
             var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
             play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
           }
-
         }
 
-        var hash = getTimelineHash(movie, 'VK');
-        var timeline = Lampa.Timeline.view(hash);
-        play.timeline = timeline;
-
-        var beholdHash = getBeholdHash(movie, 'VK');
-        markViewed(beholdHash);
-
-        window._iframe_cloud_current = {
-          timeline: timeline,
-          beholdHash: beholdHash,
-          movie: movie,
-          label: 'VK'
-        };
-
-        addToHistory(movie);
+        setupVkTimeline(play, movie);
+        var timeline = play.timeline;
 
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
@@ -685,6 +734,9 @@
           if (el.readyState >= 1) doRestore();
           else el.addEventListener('loadedmetadata', doRestore);
         }, 1500);
+
+        setupPlayerBack();
+        setupPositionSave(timeline);
 
       }).catch(function(e) {
         console.log('[iframe-cloud] VK info error:', e.message);
@@ -931,19 +983,6 @@
         try { Lampa.Player.close(); } catch (err) {}
         try { Lampa.Controller.toggle('content'); } catch (err) {}
       }
-    };
-    
-    document.addEventListener('keydown', handler);
-    
-    var cleanupHandler = function() {
-      if (location.hash.includes('content') || !location.hash) {
-        document.removeEventListener('keydown', handler);
-        window.removeEventListener('hashchange', cleanupHandler);
-      }
-    };
-    
-    window.addEventListener('hashchange', cleanupHandler);
-  }
     };
     
     document.addEventListener('keydown', handler);
