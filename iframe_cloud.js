@@ -976,7 +976,7 @@
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
-        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {}; })
+        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {} }; })
       } : undefined
     };
 
