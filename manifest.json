@@ -1,7 +1,7 @@
 {
   "type": "video",
-  "version": "5.50.1",
+  "version": "5.60.0",
   "name": "MovieZone",
-  "description": "VK Video + Collaps 1080p + Kinogo + Auto-fallback",
+  "description": "VK Video + Collaps 1080p + Kinogo — menu selection",
   "component": "iframe_cloud"
 }
