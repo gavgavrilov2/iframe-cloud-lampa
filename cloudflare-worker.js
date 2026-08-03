@@ -840,6 +840,30 @@ async function fetchViaVercel(targetUrl, referer) {
   return resp;
 }
 
+async function fetchViaVercelWithFallback(targetUrl, referer) {
+  try {
+    var resp = await fetchViaVercel(targetUrl, referer);
+    var text = await resp.text();
+    if (!text || text.length < 20) throw new Error('Empty response');
+    return { text: text, ok: true };
+  } catch(e) {
+    try {
+      var directResp = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/vnd.apple.mpegurl',
+          'Accept-Language': 'ru-RU,ru;q=0.9',
+          'Referer': referer || ''
+        }
+      });
+      var directText = await directResp.text();
+      return { text: directText, ok: true };
+    } catch(e2) {
+      return { text: '', ok: false };
+    }
+  }
+}
+
 async function handleKinogoSearch(query, corsHeaders) {
   try {
     var searchUrl = KINOGO_BASE + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(query);
@@ -884,8 +908,8 @@ async function handleKinogoSearch(query, corsHeaders) {
 
 async function handleKinogoPage(pageUrl, corsHeaders) {
   try {
-    var resp = await fetchViaVercel(pageUrl, KINOGO_BASE + '/');
-    var html = await resp.text();
+    var result = await fetchViaVercelWithFallback(pageUrl, KINOGO_BASE + '/');
+    var html = result.text;
 
     var embedMatch = html.match(/data-src="(https?:\/\/cinemar\.cc\/embed\/[^"]+)"/);
     if (!embedMatch) embedMatch = html.match(/data-src="(\/\/cinemar\.cc\/embed\/[^"]+)"/);
@@ -921,22 +945,10 @@ async function handleKinogoEmbed(embedUrl, corsHeaders) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var resp = await fetch(embedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'ru-RU,ru;q=0.9',
-        'Referer': KINOGO_BASE + '/'
-      }
-    });
-    var html = await resp.text();
+    var result = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
+    var html = result.text;
 
     var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    if (!fileMatch) {
-      resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
-      html = await resp.text();
-      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    }
     if (!fileMatch) {
       return new Response(JSON.stringify({ error: 'No file found in embed', playlist: [] }), {
         status: 200, headers: corsHeaders
@@ -957,54 +969,53 @@ async function handleKinogoEmbed(embedUrl, corsHeaders) {
 }
 
 function decodePlayerjs(encoded) {
-  if (encoded.indexOf('#2') !== 0) return [];
+  if (!encoded || typeof encoded !== 'string') return [];
 
-  var data = encoded.substring(2);
-  var separatorCode = parseInt(data.substring(0, 2));
-  var separator = String.fromCharCode(separatorCode);
-  var parts = data.substring(2).split(separator);
-  var ml = 32;
+  if (encoded.indexOf('#2') === 0) {
+    var data = encoded.substring(2);
+    var separatorCode = parseInt(data.substring(0, 2));
+    var separator = String.fromCharCode(separatorCode);
+    var parts = data.substring(2).split(separator);
+    var ml = 32;
 
-  var sliced = parts.map(function(part) {
-    var t = parseInt(part.slice(-1));
-    if (part.length > ml) {
-      return part.substring(2 * t, 2 * t + part.length - 3 * t - 1) + part.substring(0, t);
+    var sliced = parts.map(function(part) {
+      var t = parseInt(part.slice(-1));
+      if (part.length > ml) {
+        return part.substring(2 * t, 2 * t + part.length - 3 * t - 1) + part.substring(0, t);
+      }
+      return part;
+    });
+
+    var val = sliced.join('');
+    var padding = val.length % 4;
+    if (padding) val += '='.repeat(4 - padding);
+
+    try {
+      var decoded = atob(val);
+      return JSON.parse(decoded);
+    } catch (e) {
+      return [];
     }
-    return part;
-  });
-
-  var val = sliced.join('');
-  var padding = val.length % 4;
-  if (padding) val += '='.repeat(4 - padding);
+  }
 
   try {
-    var decoded = atob(val);
-    return JSON.parse(decoded);
-  } catch (e) {
-    return [];
-  }
+    var tryDecoded = atob(encoded);
+    var tryParsed = JSON.parse(tryDecoded);
+    if (Array.isArray(tryParsed)) return tryParsed;
+  } catch (e) {}
+
+  console.log('[Worker] decodePlayerjs: unknown format, prefix=' + (encoded.substring(0, 4)));
+  return [];
 }
 
 async function handleKinogoInfo(embedUrl, corsHeaders) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var resp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
-    var html = await resp.text();
+    var result = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
+    var html = result.text;
 
     var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    if (!fileMatch) {
-      resp = await fetch(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
-          'Accept-Language': 'ru-RU,ru;q=0.9',
-          'Referer': KINOGO_BASE + '/'
-        }
-      });
-      html = await resp.text();
-      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    }
     if (!fileMatch) {
       return new Response(JSON.stringify({ tracks: [], m3u8: null }), {
         status: 200, headers: corsHeaders
@@ -1017,11 +1028,6 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
         status: 200, headers: corsHeaders
       });
     }
-
-    var workerBase = new URL('https://silent-recipe-5c08.rustypony.workers.dev');
-    try { workerBase = new URL(embedUrl).origin; } catch(e) {}
-    try { workerBase = new URL('https://silent-recipe-5c08.rustypony.workers.dev'); } catch(e) {}
-    workerBase = 'https://silent-recipe-5c08.rustypony.workers.dev';
 
     var tracks = [];
     var firstFile = null;
@@ -1070,22 +1076,10 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
 
     var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
 
-    var embedResp = await fetchViaVercel(embedUrl, KINOGO_BASE + '/');
-    var html = await embedResp.text();
+    var embedResult = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
+    var html = embedResult.text;
 
     var fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    if (!fileMatch) {
-      embedResp = await fetch(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
-          'Accept-Language': 'ru-RU,ru;q=0.9',
-          'Referer': KINOGO_BASE + '/'
-        }
-      });
-      html = await embedResp.text();
-      fileMatch = html.match(/"file"\s*:\s*"([\s\S]+?)"/);
-    }
     if (!fileMatch) {
       return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
         status: 200,
@@ -1132,6 +1126,13 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       voiceSuffixes.push(hm ? hm[1] : '');
     }
 
+    if (!variants.length) {
+      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
+      });
+    }
+
     var audioVariant = variants[0];
     for (var q = 1; q < variants.length; q++) {
       if (variants[q].bandwidth > audioVariant.bandwidth) audioVariant = variants[q];
@@ -1176,27 +1177,29 @@ function parseVariantsFromM3u8(m3u8) {
     var line = lines[i].trim();
     if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
       var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
-      if (nextLine && nextLine.indexOf('#') !== 0 && nextLine.indexOf('http') === 0) {
-        var bwMatch = line.match(/BANDWIDTH=(\d+)/);
-        var bw = bwMatch ? parseInt(bwMatch[1]) : 1000000;
-        var resMatch = line.match(/RESOLUTION=(\d+x\d+)/);
-        var res = resMatch ? resMatch[1] : '1280x720';
-        var quality = nextLine.match(/\.(\d+)\.mp4/);
-        var qNum = quality ? parseInt(quality[1]) : 0;
-        variants.push({ bandwidth: bw, resolution: res, url: nextLine, quality: qNum });
-      }
+      if (!nextLine || nextLine.indexOf('#') === 0) continue;
+      if (nextLine.indexOf('http') !== 0) continue;
+      var bwMatch = line.match(/BANDWIDTH=(\d+)/);
+      var bw = bwMatch ? parseInt(bwMatch[1]) : 1000000;
+      var resMatch = line.match(/RESOLUTION=(\d+x\d+)/);
+      var res = resMatch ? resMatch[1] : '1280x720';
+      var quality = nextLine.match(/\.(\d+)\.mp4/);
+      var qNum = quality ? parseInt(quality[1]) : 0;
+      variants.push({ bandwidth: bw, resolution: res, url: nextLine, quality: qNum });
     }
   }
   variants.sort(function(a, b) { return b.quality - a.quality; });
   return variants;
 }
 
-function replaceVariantSuffix(vercelUrl, newSuffix) {
-  var match = vercelUrl.match(/url=([^&]+)/);
-  if (!match) return vercelUrl;
-  var originalUrl = decodeURIComponent(match[1]);
-  originalUrl = originalUrl.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
-  return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
+function replaceVariantSuffix(url, newSuffix) {
+  var match = url.match(/url=([^&]+)/);
+  if (match) {
+    var originalUrl = decodeURIComponent(match[1]);
+    originalUrl = originalUrl.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
+    return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
+  }
+  return url.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
 }
 
 function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
