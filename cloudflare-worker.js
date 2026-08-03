@@ -1355,76 +1355,155 @@ async function handleCollapsEmbed(embedUrl, corsHeaders) {
 }
 
 function parseMakePlayer(html) {
-  var find = html.replace(/\n/g, '').match(/makePlayer\(\{([\s\S]*?)\}\);?/);
-  if (!find) return null;
+  var result = {};
 
-  var jsStr = find[1];
+  // Find the makePlayer call region to avoid matching JS comments/variables
+  var mpIdx = html.indexOf('makePlayer(');
+  var region = mpIdx !== -1 ? html.substring(mpIdx) : html;
 
-  // Quote unquoted keys: word: → "word":
-  jsStr = jsStr.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
+  // hls URL — match hls: "url" anywhere in makePlayer region
+  var hlsMatch = region.match(/hls\s*:\s*["']([^"']+)["']/);
+  if (hlsMatch) result.hls = hlsMatch[1];
 
-  // Remove trailing commas before } or ]
-  jsStr = jsStr.replace(/,\s*([}\]])/g, '$1');
+  // dash URL
+  var dashMatch = region.match(/\bdash\s*:\s*["']([^"']+)["']/);
+  if (dashMatch) result.dash = dashMatch[1];
 
-  // Replace single quotes with double quotes for JSON
-  jsStr = jsStr.replace(/'/g, '"');
+  // dasha URL (alternative dash)
+  var dashaMatch = region.match(/\bdasha\s*:\s*["']([^"']+)["']/);
+  if (dashaMatch) result.dasha = dashaMatch[1];
 
-  try {
-    return JSON.parse(jsStr);
-  } catch(e) {
-    return null;
+  // audio.names — find audio: {...} with nested braces handling
+  var audioIdx = region.indexOf('audio:');
+  if (audioIdx === -1) audioIdx = region.indexOf('audio :');
+  if (audioIdx !== -1) {
+    var aStart = region.indexOf('{', audioIdx);
+    if (aStart !== -1) {
+      var aDepth = 0, aEnd = -1;
+      for (var ai = aStart; ai < region.length && ai < aStart + 2000; ai++) {
+        if (region[ai] === '{') aDepth++;
+        else if (region[ai] === '}') { aDepth--; if (aDepth === 0) { aEnd = ai; break; } }
+      }
+      if (aEnd !== -1) {
+        var audioBlock = region.substring(aStart, aEnd + 1);
+        var anMatch = audioBlock.match(/["']?names["']?\s*:\s*\[([^\]]+)\]/);
+        if (anMatch) {
+          var names = [];
+          var nr = /["']([^"']+)["']/g;
+          var nm;
+          while ((nm = nr.exec(anMatch[1])) !== null) {
+            if (nm[1] !== 'delete') names.push(nm[1]);
+          }
+          result.audio = { names: names };
+        }
+      }
+    }
   }
+
+  // cc array (subtitles) — find cc: [{...}] with content
+  // Handle both quoted ("cc") and unquoted (cc) keys
+  var ccIdx = -1;
+  var ccPatterns = [/"cc"\s*:\s*\[/, /(?:^|[{,])\s*cc\s*:\s*\[/m, /cc\s*:\s*\[\s*\{/];
+  for (var cpi = 0; cpi < ccPatterns.length; cpi++) {
+    ccIdx = region.search(ccPatterns[cpi]);
+    if (ccIdx !== -1) break;
+  }
+  if (ccIdx !== -1) {
+    var cStart = region.indexOf('[', ccIdx);
+    var cDepth = 0, cEnd = -1;
+    for (var ci = cStart; ci < region.length && ci < cStart + 5000; ci++) {
+      if (region[ci] === '[') cDepth++;
+      else if (region[ci] === ']') { cDepth--; if (cDepth === 0) { cEnd = ci; break; } }
+    }
+    if (cEnd !== -1) {
+      var ccBlock = region.substring(cStart, cEnd + 1);
+      var ccItems = [];
+      var ccParts = ccBlock.match(/\{[^}]*\}/g) || [];
+      ccParts.forEach(function(item) {
+        var urlM = item.match(/["']?url["']?\s*:\s*["']([^"']+)["']/);
+        var nameM = item.match(/["']?name["']?\s*:\s*["']([^"']+)["']/);
+        if (urlM) ccItems.push({ url: urlM[1], name: nameM ? nameM[1] : '' });
+      });
+      result.cc = ccItems;
+    }
+  }
+
+  // qualityByWidth
+  var qwMatch = region.match(/qualityByWidth\s*:\s*(\{[^}]+\})/);
+  if (qwMatch) {
+    try {
+      result.qualityByWidth = JSON.parse(qwMatch[1].replace(/'/g, '"'));
+    } catch(e) {}
+  }
+
+  // Detect serial vs movie: check if playlist has actual season objects with episodes
+  // Look for season:\d inside episodes array context — not just JS function code
+  var hasPlaylistSeasons = /playlist\s*:\s*\{[\s\S]*?seasons\s*:\s*\[[\s\S]*?season\s*:\s*\d/.test(region);
+  result.type = hasPlaylistSeasons ? 'serial' : 'movie';
+  result.seasons = null;
+
+  return result;
 }
 
 async function handleCollapsDirect(kpId, corsHeaders) {
   try {
-    var apiUrl = 'https://api.bhcesh.me/embed/kp/' + kpId;
+    var apiUrl = 'https://api.delivembd.ws/embed/kp/' + kpId;
 
-    var resp = await fetch(apiUrl, {
-      headers: {
-        'Origin': 'https://kinokrad.my',
-        'Accept': '*/*',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'cross-site'
-      }
+    // Use Vercel proxy since direct fetch gets blocked
+    var proxyUrl = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(apiUrl) + '&referer=' + encodeURIComponent('https://kinokrad.my');
+    var resp = await fetch(proxyUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
 
     if (!resp.ok) {
-      return new Response(JSON.stringify({ error: 'Collaps API returned ' + resp.status }), {
-        status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      // Fallback: try direct fetch with full browser headers
+      resp = await fetch(apiUrl, {
+        headers: {
+          'Origin': 'https://kinokrad.my',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Referer': 'https://kinokrad.my/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'cross-site'
+        }
       });
+
+      if (!resp.ok) {
+        return new Response(JSON.stringify({ error: 'Collaps API returned ' + resp.status }), {
+          status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     var html = await resp.text();
     var obj = parseMakePlayer(html);
 
     if (!obj) {
-      return new Response(JSON.stringify({ error: 'Failed to parse makePlayer', html_length: html.length }), {
+      // Debug: check what we got
+      var debug = {
+        error: 'Failed to parse makePlayer',
+        html_length: html.length,
+        has_makePlayer: html.indexOf('makePlayer') !== -1,
+        has_hls: html.indexOf('hls') !== -1,
+        has_dash: html.indexOf('dash') !== -1,
+        has_source: html.indexOf('source:') !== -1,
+        snippet: html.substring(0, 500)
+      };
+      return new Response(JSON.stringify(debug), {
         status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
     var result = {
-      type: obj.seasons || (obj.playlist && obj.playlist.seasons) ? 'serial' : 'movie',
+      type: obj.type || 'movie',
       hls: obj.hls || null,
       dash: obj.dash || obj.dasha || null,
-      audio: { names: [] },
-      cc: [],
+      audio: { names: (obj.audio && obj.audio.names) || [] },
+      cc: obj.cc || [],
       qualityByWidth: obj.qualityByWidth || {},
-      seasons: null
+      seasons: obj.seasons || null
     };
-
-    // Extract audio names
-    if (obj.audio && obj.audio.names) {
-      result.audio.names = obj.audio.names.filter(function(n) { return n && n !== 'delete'; });
-    }
-
-    // Extract subtitles
-    if (obj.cc && Array.isArray(obj.cc)) {
-      result.cc = obj.cc.map(function(c) { return { name: c.name || '', url: c.url || '' }; }).filter(function(c) { return c.url; });
-    }
 
     // Extract seasons for serials
     if (result.type === 'serial') {
