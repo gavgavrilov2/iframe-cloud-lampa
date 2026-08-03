@@ -916,7 +916,11 @@
     });
   }
 
-  /* ---- Collaps Direct API: DASH 1080p ---- */
+  /* ---- Collaps Direct API: HLS 720p + DASH 1080p (via proxy) ---- */
+
+  function collapseProxy(url) {
+    return VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
+  }
 
   function playCollapsDirect(kpId, title, movie) {
     return new Promise(function(resolve, reject) {
@@ -936,12 +940,14 @@
           var allEpisodes = [];
           data.seasons.forEach(function(season) {
             (season.episodes || []).forEach(function(ep) {
+              var epUrl = ep.hls || ep.dash;
+              if (epUrl) epUrl = collapseProxy(epUrl);
               allEpisodes.push({
                 season: season.season,
                 episode: ep.episode,
                 title: ep.title || ('S' + season.season + 'E' + ep.episode),
-                url: ep.dash || ep.hls,
-                quality: ep.dash ? '1080p DASH' : '720p HLS',
+                url: epUrl,
+                quality: ep.hls ? '720p HLS' : '1080p DASH',
                 audio: ep.audio && ep.audio.length ? ep.audio : audioNames
               });
             });
@@ -952,13 +958,14 @@
           return;
         }
 
-        var streamUrl = data.dash || data.hls;
+        var streamUrl = data.hls || data.dash;
         if (!streamUrl) {
           reject(new Error('No stream URL'));
           return;
         }
 
-        var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
+        streamUrl = collapseProxy(streamUrl);
+        var qualityLabel = data.hls ? '720p HLS' : '1080p DASH';
         playCollapsStream(streamUrl, qualityLabel, title, movie, audioNames, subtitles);
         resolve();
 
