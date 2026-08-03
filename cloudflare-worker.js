@@ -77,7 +77,7 @@ export default {
     }
 
     if (vkSearch) {
-      return await handleVkSearch(vkSearch, vkYear, corsHeaders);
+      return await handleVkSearch(vkSearch, vkYear, corsHeaders, env);
     }
 
     if (kpuUrl) {
@@ -267,18 +267,15 @@ async function handleProxy(targetUrl, corsHeaders, request) {
 
 var VK_TOKEN_CACHE = { token: null, expires: 0 };
 
-var VK_CLIENT_ID = 52461373;
-var VK_CLIENT_SECRET = 'o557NLIkAErNhakXrQ7A';
-
-async function getVkToken() {
+async function getVkToken(env) {
   var now = Date.now();
   if (VK_TOKEN_CACHE.token && VK_TOKEN_CACHE.expires > now) {
     return VK_TOKEN_CACHE.token;
   }
 
   try {
-    var body = 'client_id=' + VK_CLIENT_ID +
-      '&client_secret=' + VK_CLIENT_SECRET +
+    var body = 'client_id=' + (env.VK_CLIENT_ID || '52461373') +
+      '&client_secret=' + (env.VK_CLIENT_SECRET || 'o557NLIkAErNhakXrQ7A') +
       '&scopes=video_anonymous' +
       '&isApiOauthAnonymEnabled=false' +
       '&version=1' +
@@ -306,9 +303,9 @@ async function getVkToken() {
   return null;
 }
 
-async function handleVkSearch(query, year, corsHeaders) {
+async function handleVkSearch(query, year, corsHeaders, env) {
   try {
-    var token = await getVkToken();
+    var token = await getVkToken(env);
     if (!token) {
       return new Response(JSON.stringify({ error: 'VK token failed', videos: [] }), {
         status: 200, headers: corsHeaders
@@ -319,7 +316,7 @@ async function handleVkSearch(query, year, corsHeaders) {
     if (year) searchQ += ' ' + year;
 
     var body = 'v=5.264' +
-      '&client_id=' + VK_CLIENT_ID +
+      '&client_id=' + (env.VK_CLIENT_ID || '52461373') +
       '&screen_ref=search_video_service' +
       '&input_method=keyboard_search_button' +
       '&q=' + encodeURIComponent(searchQ) +
@@ -1197,10 +1194,10 @@ function replaceVariantSuffix(url, newSuffix) {
   var match = url.match(/url=([^&]+)/);
   if (match) {
     var originalUrl = decodeURIComponent(match[1]);
-    originalUrl = originalUrl.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
+    originalUrl = originalUrl.replace(/\.m3u8$/, newSuffix + '.m3u8');
     return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
   }
-  return url.replace(/manifest\.m3u8$/, 'manifest' + newSuffix + '.m3u8');
+  return url.replace(/\.m3u8$/, newSuffix + '.m3u8');
 }
 
 function parseVariants(m3u8, workerOrigin, baseProxyUrl) {
