@@ -1,8 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.60.1');
-  console.log('[MovieZone] Loading v5.60.2');
+  console.log('[MovieZone] Loading v5.60.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -917,58 +916,7 @@
     });
   }
 
-  /* ---- Collaps Direct API: HLS 720p + DASH 1080p (via proxy) ---- */
-
-  function collapseProxy(url) {
-    return VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
-  }
-
-  function setupPositionSave(timeline) {
-    if (!timeline) return;
-    setTimeout(function() {
-      var el = document.querySelector('video');
-      if (!el) return;
-
-      var lastSave = 0;
-      var savePos = function() {
-        var now = Date.now();
-        if (now - lastSave < 3000) return;
-        if (!el.duration || el.duration < 10) return;
-        lastSave = now;
-        timeline.time = Math.round(el.currentTime);
-        timeline.duration = Math.round(el.duration);
-        timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-        Lampa.Timeline.update(timeline);
-      };
-
-      el.addEventListener('timeupdate', savePos);
-      el.addEventListener('pause', savePos);
-      el.addEventListener('ended', savePos);
-
-      var doRestore = function() {
-        if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-          el.currentTime = timeline.time;
-          Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-        }
-      };
-
-      if (el.readyState >= 1) doRestore();
-      else el.addEventListener('loadedmetadata', doRestore);
-    }, 1500);
-  }
-
-  function setupPlayerBack() {
-    var handler = function(e) {
-      if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
-        try { Lampa.Player.close(); } catch (err) {}
-        try { Lampa.Controller.toggle('content'); } catch (err) {}
-      }
-    };
-    document.addEventListener('keydown', handler);
-    setTimeout(function() {
-      document.removeEventListener('keydown', handler);
-    }, 30000);
-  }
+  /* ---- Collaps Direct API: DASH 1080p ---- */
 
   function playCollapsDirect(kpId, title, movie) {
     return new Promise(function(resolve, reject) {
@@ -988,14 +936,12 @@
           var allEpisodes = [];
           data.seasons.forEach(function(season) {
             (season.episodes || []).forEach(function(ep) {
-              var epUrl = ep.hls || ep.dash;
-              if (epUrl) epUrl = collapseProxy(epUrl);
               allEpisodes.push({
                 season: season.season,
                 episode: ep.episode,
                 title: ep.title || ('S' + season.season + 'E' + ep.episode),
-                url: epUrl,
-                quality: ep.hls ? '720p HLS' : '1080p DASH',
+                url: ep.dash || ep.hls,
+                quality: ep.dash ? '1080p DASH' : '720p HLS',
                 audio: ep.audio && ep.audio.length ? ep.audio : audioNames
               });
             });
@@ -1006,14 +952,13 @@
           return;
         }
 
-        var streamUrl = data.hls || data.dash;
+        var streamUrl = data.dash || data.hls;
         if (!streamUrl) {
           reject(new Error('No stream URL'));
           return;
         }
 
-        streamUrl = collapseProxy(streamUrl);
-        var qualityLabel = data.hls ? '720p HLS' : '1080p DASH';
+        var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
         playCollapsStream(streamUrl, qualityLabel, title, movie, audioNames, subtitles);
         resolve();
 
@@ -1089,8 +1034,6 @@
         else el.addEventListener('loadedmetadata', doRestore);
       }, 1500);
     }
-    setupPlayerBack();
-    setupPositionSave(video.timeline);
   }
 
   function showCollapsEpisodeSelector(episodes, title, movie, audioNames, subtitles) {
@@ -1541,18 +1484,16 @@
           getKinopoiskId(movie).then(function(kpId) {
             if (!kpId) {
               Lampa.Loading.stop();
-              Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d');
+              Lampa.Noty.show(PLUGIN_NAME + ': Kinopoisk ID не найден');
               return;
             }
-            playCollapsDirect(kpId, title, movie).then(function() {
-              Lampa.Loading.stop();
-            }).catch(function(e) {
+            playCollapsDirect(kpId, title, movie).catch(function(e) {
               Lampa.Loading.stop();
               Lampa.Noty.show(PLUGIN_NAME + ': Collaps \u2014 ' + e.message);
             });
           }).catch(function(e) {
             Lampa.Loading.stop();
-            Lampa.Noty.show(PLUGIN_NAME + ': \u043e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0438\u0441\u043a\u0430 KP \u2014 ' + e.message);
+            Lampa.Noty.show(PLUGIN_NAME + ': ошибка поиска KP \u2014 ' + e.message);
           });
         }
       },
