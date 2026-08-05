@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.4');
+  console.log('[MovieZone] Loading v5.77.5');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -157,6 +157,8 @@
     });
   }
 
+  var __kpIdCache = {};
+
   function getKinopoiskId(movie) {
     if (movie.kinopoisk_id) {
       debugLog('info', 'getKinopoiskId: direct id', { kpId: movie.kinopoisk_id });
@@ -164,19 +166,27 @@
     }
 
     var imdbId = movie.imdb_id || (movie.external_ids && movie.external_ids.imdb_id);
-    if (imdbId) {
-      debugLog('debug', 'getKinopoiskId: imdb_id fallback', { imdbId: imdbId });
+    if (imdbId && __kpIdCache[imdbId]) {
+      debugLog('debug', 'getKinopoiskId: cache hit (imdb)', { imdbId: imdbId });
+      return Promise.resolve(__kpIdCache[imdbId]);
     }
 
-    debugLog('log', 'getKinopoiskId: trying search by name', { title: movie.title, year: getYear(movie) });
+    var cacheKey = normalizeTitle(movie.title || '') + '_' + (getYear(movie) || '');
+    if (__kpIdCache[cacheKey]) {
+      debugLog('debug', 'getKinopoiskId: cache hit (title)', { cacheKey: cacheKey });
+      return Promise.resolve(__kpIdCache[cacheKey]);
+    }
+
+    debugLog('log', 'getKinopoiskId: trying search', { title: movie.title });
     return searchKinopoiskByName(movie).then(function(kpId) {
       if (kpId) {
-        debugLog('info', 'getKinopoiskId: found via name search', { kpId: kpId });
-        return kpId;
+        __kpIdCache[cacheKey] = kpId;
+        if (imdbId) __kpIdCache[imdbId] = kpId;
+        debugLog('info', 'getKinopoiskId: found', { kpId: kpId });
+      } else {
+        debugLog('warn', 'getKinopoiskId: not found');
       }
-
-      debugLog('warn', 'getKinopoiskId: no KP ID found');
-      return null;
+      return kpId;
     });
   }
 
