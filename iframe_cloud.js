@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.10');
+  console.log('[MovieZone] Loading v5.77.11');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -334,8 +334,8 @@
 
         addToHistory(movie);
 
-        Lampa.Player.clear();
-        Lampa.Player.stop();
+    try { Lampa.Player.clear(); } catch(e) { debugLog('warn', 'Player.clear failed', { error: e.message }); }
+    try { Lampa.Player.stop(); } catch(e) { debugLog('warn', 'Player.stop failed', { error: e.message }); }
         setTimeout(function() {
           Lampa.Player.play(video);
           Lampa.Player.playlist([video]);
@@ -745,8 +745,8 @@
 
     addToHistory(movie);
 
-    Lampa.Player.clear();
-    Lampa.Player.stop();
+    try { Lampa.Player.clear(); } catch(e) {}
+    try { Lampa.Player.stop(); } catch(e) {}
     setTimeout(function() {
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
@@ -907,8 +907,8 @@
 
       addToHistory(movie);
 
-      Lampa.Player.clear();
-      Lampa.Player.stop();
+      try { Lampa.Player.clear(); } catch(e) {}
+      try { Lampa.Player.stop(); } catch(e) {}
       setTimeout(function() {
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
@@ -1160,8 +1160,8 @@
       addToHistory(movie);
     }
 
-    Lampa.Player.clear();
-    Lampa.Player.stop();
+    try { Lampa.Player.clear(); } catch(e) { debugLog('warn', 'Player.clear failed', { error: e.message }); }
+    try { Lampa.Player.stop(); } catch(e) { debugLog('warn', 'Player.stop failed', { error: e.message }); }
 
     var onErrorFired = false;
     function onError() {
@@ -1600,7 +1600,7 @@
               play.timeline = timeline;
 
               addToHistory(movie);
-              Lampa.Player.stop();
+              try { Lampa.Player.stop(); } catch(e) {}
               Lampa.Player.play(play);
               Lampa.Player.playlist([play]);
               Lampa.Player.open();
