@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.3');
+  console.log('[MovieZone] Loading v5.77.4');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -158,37 +158,25 @@
   }
 
   function getKinopoiskId(movie) {
-    if (movie.kinopoisk_id) return Promise.resolve(movie.kinopoisk_id);
+    if (movie.kinopoisk_id) {
+      debugLog('info', 'getKinopoiskId: direct id', { kpId: movie.kinopoisk_id });
+      return Promise.resolve(movie.kinopoisk_id);
+    }
 
     var imdbId = movie.imdb_id || (movie.external_ids && movie.external_ids.imdb_id);
     if (imdbId) {
-      return fetchJsonViaProxy(KP_API_BASE + '?externalId.imdb=' + imdbId + '&selectFields=id,name&token=' + KP_API_TOKEN)
-        .then(function(d) {
-          if (d.docs && d.docs.length) {
-            var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
-            return best && best.id || null;
-          }
-          return searchKinopoiskByName(movie);
-        })
-        .catch(function() {
-          return searchKinopoiskByName(movie);
-        });
+      debugLog('debug', 'getKinopoiskId: imdb_id fallback', { imdbId: imdbId });
     }
 
+    debugLog('log', 'getKinopoiskId: trying search by name', { title: movie.title, year: getYear(movie) });
     return searchKinopoiskByName(movie).then(function(kpId) {
-      if (kpId) return kpId;
+      if (kpId) {
+        debugLog('info', 'getKinopoiskId: found via name search', { kpId: kpId });
+        return kpId;
+      }
 
-      var tmdbId = movie.id;
-      var query = tmdbId ? 'externalId.tmdb=' + tmdbId : null;
-      if (!query) return null;
-
-      return fetchJsonViaProxy(KP_API_BASE + '?' + query + '&selectFields=id,name&token=' + KP_API_TOKEN)
-        .then(function(d) {
-          if (!d.docs || !d.docs.length) return null;
-          var best = d.docs.find(function(m) { return m.name; }) || d.docs[0];
-          return best && best.id || null;
-        })
-        .catch(function() { return null; });
+      debugLog('warn', 'getKinopoiskId: no KP ID found');
+      return null;
     });
   }
 
@@ -1100,6 +1088,14 @@
 
         streamUrl = collapseProxy(streamUrl);
         var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
+
+        debugLog('info', 'playCollapsStream: starting', {
+          streamUrl: streamUrl.substring(0, 80) + '...',
+          qualityLabel: qualityLabel,
+          hasDash: !!data.dash,
+          hasHls: !!data.hls
+        });
+
         playCollapsStream(streamUrl, qualityLabel, title, movie, audioNames, subtitles);
         resolve();
 
