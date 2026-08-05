@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.76.1');
+  console.log('[MovieZone] Loading v5.76.2');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -616,80 +616,47 @@
 
       fetchJson(infoUrl).then(function(info) {
         var mp4Qualities = Object.keys(info.mp4 || {}).map(function(q) { return parseInt(q); }).sort(function(a, b) { return b - a; });
-        var bestQuality = mp4Qualities.length ? mp4Qualities[0] : 720;
-
-
-        Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + bestQuality + 'p, ' + titleTime + ')');
-
-        var qualityLabel = mp4Qualities.length > 1 ? mp4Qualities[mp4Qualities.length - 1] + 'p-' + mp4Qualities[0] + 'p' : bestQuality + 'p';
-
-        var play = {
-          url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
-          title: PLUGIN_NAME + ' ' + qualityLabel + ' — ' + best.title,
-          subtitles: []
-        };
-
-        if (mp4Qualities.length > 1) {
-          play.quality = {};
-          var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p', 240: '240p' };
-          for (var i = 0; i < mp4Qualities.length; i++) {
-            var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
-            play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
-          }
+        if (!mp4Qualities.length) {
+          Lampa.Noty.show(PLUGIN_NAME + ': VK — нет доступных качеств');
+          return;
         }
 
-        var hash = getTimelineHash(movie, 'VK');
-        var timeline = Lampa.Timeline.view(hash);
-        play.timeline = timeline;
+        var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p', 240: '240p' };
 
-        var beholdHash = getBeholdHash(movie, 'VK');
-        markViewed(beholdHash);
-
-        window._iframe_cloud_current = {
-          timeline: timeline,
-          beholdHash: beholdHash,
-          movie: movie,
-          label: 'VK'
-        };
-
-        addToHistory(movie);
-
-        Lampa.Player.play(play);
-        Lampa.Player.playlist([play]);
-
-        setupPlayerBack();
-
-        setTimeout(function() {
-          var el = document.querySelector('video');
-          if (!el) return;
-
-          var lastSave = 0;
-          var savePos = function() {
-            var now = Date.now();
-            if (now - lastSave < 3000) return;
-            if (!el.duration || el.duration < 10) return;
-            lastSave = now;
-            timeline.time = Math.round(el.currentTime);
-            timeline.duration = Math.round(el.duration);
-            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-            Lampa.Timeline.update(timeline);
+        if (mp4Qualities.length === 1) {
+          // Only one quality — play directly
+          var play = {
+            url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[0],
+            title: PLUGIN_NAME + ' ' + qualityLabels[mp4Qualities[0]] + ' — ' + best.title,
+            subtitles: []
           };
+          playVkVideo(play, movie, best);
+        } else {
+          // Multiple qualities — show selection menu
+          var items = mp4Qualities.map(function(q) {
+            return {
+              title: qualityLabels[q] || (q + 'p'),
+              subtitle: mp4Qualities.length + ' качеств доступно',
+              _qual: q
+            };
+          });
 
-          el.addEventListener('timeupdate', savePos);
-          el.addEventListener('pause', savePos);
-          el.addEventListener('ended', savePos);
-
-          var doRestore = function() {
-            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-              el.currentTime = timeline.time;
-              Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+          Lampa.Select.show({
+            title: PLUGIN_NAME + ' — ' + best.title,
+            items: items,
+            onSelect: function(item) {
+              var play = {
+                url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + item._qual,
+                title: PLUGIN_NAME + ' ' + (qualityLabels[item._qual] || (item._qual + 'p')) + ' — ' + best.title,
+                subtitles: []
+              };
+              playVkVideo(play, movie, best);
+            },
+            onBack: function() {
+              Lampa.Timeline.show();
             }
-          };
-
-          if (el.readyState >= 1) doRestore();
-          else el.addEventListener('loadedmetadata', doRestore);
-        }, 1500);
-
+          });
+        }
       }).catch(function(e) {
         console.log('[iframe-cloud] VK info error:', e.message);
         Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
@@ -699,6 +666,60 @@
       console.log('[iframe-cloud] VK search error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': VK ошибка — ' + e.message);
     });
+  }
+
+  function playVkVideo(play, movie, best) {
+    var hash = getTimelineHash(movie, 'VK');
+    var timeline = Lampa.Timeline.view(hash);
+    play.timeline = timeline;
+
+    var beholdHash = getBeholdHash(movie, 'VK');
+    markViewed(beholdHash);
+
+    window._iframe_cloud_current = {
+      timeline: timeline,
+      beholdHash: beholdHash,
+      movie: movie,
+      label: 'VK'
+    };
+
+    addToHistory(movie);
+
+    Lampa.Player.play(play);
+    Lampa.Player.playlist([play]);
+
+    setupPlayerBack();
+
+    setTimeout(function() {
+      var el = document.querySelector('video');
+      if (!el) return;
+
+      var lastSave = 0;
+      var savePos = function() {
+        var now = Date.now();
+        if (now - lastSave < 3000) return;
+        if (!el.duration || el.duration < 10) return;
+        lastSave = now;
+        timeline.time = Math.round(el.currentTime);
+        timeline.duration = Math.round(el.duration);
+        timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+        Lampa.Timeline.update(timeline);
+      };
+
+      el.addEventListener('timeupdate', savePos);
+      el.addEventListener('pause', savePos);
+      el.addEventListener('ended', savePos);
+
+      var doRestore = function() {
+        if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+          el.currentTime = timeline.time;
+          Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+        }
+      };
+
+      if (el.readyState >= 1) doRestore();
+      else el.addEventListener('loadedmetadata', doRestore);
+    }, 1500);
   }
 
   /* ---- Kinogo/cinemar.cc: search → multi-audio m3u8 → native player ---- */
@@ -1475,16 +1496,73 @@
     var title = movie.title || movie.name || '';
     var tv = isTvSeries(movie);
 
-    Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
+    Lampa.Loading.start('MovieZone');
 
     getKinopoiskId(movie)
       .then(function(kpId) {
-        // Start auto-fallback chain
-        trySourceChain(movie, kpId);
+        Lampa.Loading.stop();
+
+        var items = [
+          {
+            title: 'Kinogo',
+            subtitle: '1080p HLS — мульти-озвучка',
+            icon: '🎥',
+            _source: 'kinogo'
+          },
+          {
+            title: 'VK Video',
+            subtitle: tv ? 'Недоступно для сериалов' : 'до 4K MP4',
+            icon: '🎥',
+            _source: 'vk'
+          },
+          {
+            title: 'Collaps',
+            subtitle: '1080p DASH / 720p HLS',
+            icon: '🎥',
+            _source: 'collaps'
+          },
+          {
+            title: 'Авто (Auto-fallback)',
+            subtitle: 'Kinogo → VK → Collaps',
+            icon: '🤖',
+            _source: 'auto'
+          }
+        ];
+
+        Lampa.Select.show({
+          title: PLUGIN_NAME + ' — ' + title,
+          items: items,
+          onSelect: function(item) {
+            var source = item._source;
+
+            if (source === 'kinogo') {
+              searchAndPlayKinogo(movie);
+            } else if (source === 'vk') {
+              if (tv) {
+                Lampa.Noty.show(PLUGIN_NAME + ': VK недоступен для сериалов');
+                return;
+              }
+              searchAndPlayVk(movie);
+            } else if (source === 'collaps') {
+              Lampa.Loading.start('MovieZone');
+              playCollapsDirect(kpId, title, movie).then(function() {
+                Lampa.Loading.stop();
+              }).catch(function(e) {
+                Lampa.Loading.stop();
+                Lampa.Noty.show(PLUGIN_NAME + ': Collaps — ' + e.message);
+              });
+            } else if (source === 'auto') {
+              trySourceChain(movie, kpId);
+            }
+          },
+          onBack: function() {
+            Lampa.Controller.toggle('content');
+          }
+        });
       })
       .catch(function(e) {
+        Lampa.Loading.stop();
         console.log('[iframe-cloud] Error:', e.message);
-        // Fallback to Kinogo search
         searchAndPlayKinogo(movie);
       });
   }
