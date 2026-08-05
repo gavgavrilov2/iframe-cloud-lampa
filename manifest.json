@@ -1,7 +1,7 @@
 {
   "type": "video",
-  "version": "5.50.0",
+  "version": "5.76.0",
   "name": "MovieZone",
-  "description": "VK Video + Collaps 1080p + Kinogo + Auto-fallback",
+  "description": "VK MP4 quality fix + Kinogo/Collaps back button fix",
   "component": "iframe_cloud"
 }

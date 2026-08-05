@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.50.0');
+  console.log('[MovieZone] Loading v5.76.0');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -288,6 +288,8 @@
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
 
+        setupPlayerBack();
+
         setTimeout(function() {
           var el = document.querySelector('video');
           if (!el) return;
@@ -321,6 +323,7 @@
       } else {
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
+        setupPlayerBack();
       }
     }
 
@@ -626,14 +629,13 @@
           subtitles: []
         };
 
-        if (mp4Qualities.length > 1 || info.hls) {
+        if (mp4Qualities.length > 1) {
           play.quality = {};
           var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p', 240: '240p' };
           for (var i = 0; i < mp4Qualities.length; i++) {
             var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
             play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
           }
-
         }
 
         var hash = getTimelineHash(movie, 'VK');
@@ -654,6 +656,8 @@
 
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
+
+        setupPlayerBack();
 
         setTimeout(function() {
           var el = document.querySelector('video');
@@ -813,6 +817,8 @@
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
 
+      setupPlayerBack();
+
       setTimeout(function() {
         var el = document.querySelector('video');
         if (!el) return;
@@ -848,6 +854,28 @@
       console.log('[iframe-cloud] Kinogo info error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
     });
+  }
+
+  /* ---- Back button handler for native player ---- */
+
+  function setupPlayerBack() {
+    var handler = function(e) {
+      if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
+        try { Lampa.Player.close(); } catch (err) {}
+        try { Lampa.Controller.toggle('content'); } catch (err) {}
+      }
+    };
+    
+    document.addEventListener('keydown', handler);
+    
+    var cleanupHandler = function() {
+      if (location.hash.includes('content') || !location.hash) {
+        document.removeEventListener('keydown', handler);
+        window.removeEventListener('hashchange', cleanupHandler);
+      }
+    };
+    
+    window.addEventListener('hashchange', cleanupHandler);
   }
 
   /* ---- iframe fallback (for non-ortified players or failures) ---- */
@@ -976,7 +1004,7 @@
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
-        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {}; })
+        tracks: audioNames.map(function(n) { return { language: n, label: '', extra: {} }; })
       } : undefined
     };
 
@@ -1000,6 +1028,8 @@
 
     Lampa.Player.play(video);
     Lampa.Player.playlist([video]);
+
+    setupPlayerBack();
 
     // Position save/restore
     if (video.timeline) {
