@@ -1,11 +1,12 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.76.5');
+  console.log('[MovieZone] Loading v5.77.0');
 
   var PLUGIN_NAME = 'MovieZone';
-  var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
-  var VERCEL_PROXY_URL = 'https://iframe-cloud-proxy.vercel.app/api/proxy';
+    var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
+
+
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'WYVHF8M-XKBM92B-JD2ZQ8R-EPZ37AQ';
@@ -254,11 +255,12 @@
   }
 
   function playHlsProxied(hlsUrl, title, movie, label, externalAudioNames) {
-    var proxyUrl = VERCEL_PROXY_URL + '?url=' + encodeURIComponent(hlsUrl);
+    var proxyUrl = WORKER_URL + '/?proxy=' + encodeURIComponent(hlsUrl);
 
     function startPlay(audioNames) {
       var video = {
         url: proxyUrl,
+        type: 'm3u8',
         title: title || PLUGIN_NAME,
         subtitles: [],
         translate: audioNames && audioNames.length ? {
@@ -285,8 +287,12 @@
 
         addToHistory(movie);
 
-        Lampa.Player.play(video);
-        Lampa.Player.playlist([video]);
+        Lampa.Player.clear();
+        Lampa.Player.stop();
+        setTimeout(function() {
+          Lampa.Player.play(video);
+          Lampa.Player.playlist([video]);
+        }, 50);
 
         setupPlayerBack();
 
@@ -627,6 +633,7 @@
           // Only one quality — play directly
           var play = {
             url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[0],
+            type: 'mp4',
             title: PLUGIN_NAME + ' ' + qualityLabels[mp4Qualities[0]] + ' — ' + best.title,
             subtitles: []
           };
@@ -647,6 +654,7 @@
             onSelect: function(item) {
               var play = {
                 url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + item._qual,
+                type: 'mp4',
                 title: PLUGIN_NAME + ' ' + (qualityLabels[item._qual] || (item._qual + 'p')) + ' — ' + best.title,
                 subtitles: []
               };
@@ -685,8 +693,12 @@
 
     addToHistory(movie);
 
-    Lampa.Player.play(play);
-    Lampa.Player.playlist([play]);
+    Lampa.Player.clear();
+    Lampa.Player.stop();
+    setTimeout(function() {
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+    }, 50);
 
     setupPlayerBack();
 
@@ -811,6 +823,7 @@
 
       var play = {
         url: videoUrl,
+        type: 'm3u8',
         title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
         subtitles: [],
         translate: tracks.length ? { tracks: tracks } : undefined
@@ -837,8 +850,12 @@
 
       addToHistory(movie);
 
-      Lampa.Player.play(play);
-      Lampa.Player.playlist([play]);
+      Lampa.Player.clear();
+      Lampa.Player.stop();
+      setTimeout(function() {
+        Lampa.Player.play(play);
+        Lampa.Player.playlist([play]);
+      }, 50);
 
       setupPlayerBack();
 
@@ -942,19 +959,19 @@
   /* ---- Collaps proxy ---- */
 
   function collapseProxy(url) {
-    return VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
+    return WORKER_URL + '/?proxy=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
   }
 
   /* ---- Process ortified embed ---- */
 
-  function fetchTextViaVercel(targetUrl) {
-    return fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(targetUrl));
+  function fetchTextViaWorker(targetUrl) {
+    return fetchText(WORKER_URL + '/?proxy=' + encodeURIComponent(targetUrl));
   }
 
   function fetchOrtifiedViaProxies(url) {
-    return fetchTextViaVercel(url)
+    return fetchTextViaWorker(url)
       .catch(function(e) {
-        return fetchText(proxy(url));
+        return fetchText(WORKER_URL + '/?kpu=' + encodeURIComponent(url));
       });
   }
 
@@ -1039,6 +1056,7 @@
 
     var video = {
       url: url,
+      type: 'mp4',
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
@@ -1064,8 +1082,12 @@
       addToHistory(movie);
     }
 
-    Lampa.Player.play(video);
-    Lampa.Player.playlist([video]);
+    Lampa.Player.clear();
+    Lampa.Player.stop();
+    setTimeout(function() {
+      Lampa.Player.play(video);
+      Lampa.Player.playlist([video]);
+    }, 50);
 
     setupPlayerBack();
 
@@ -1327,7 +1349,7 @@
     }
 
     var testUrl = urls[index];
-    fetchText(VERCEL_PROXY_URL + '?url=' + encodeURIComponent(testUrl)).then(function(text) {
+    fetchText(WORKER_URL + '/?proxy=' + encodeURIComponent(testUrl)).then(function(text) {
       if (text && text.indexOf('.m3u8') !== -1 && text.indexOf('#EXTM3U') !== -1) {
         done(testUrl);
       } else {
@@ -1445,6 +1467,7 @@
 
               var play = {
                 url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + bestQuality,
+                type: 'mp4',
                 title: PLUGIN_NAME + ' VK ' + bestQuality + 'p — ' + best.title,
                 subtitles: []
               };
@@ -1454,7 +1477,10 @@
                 var qualityLabels = { 2160: '4K', 1440: '2K', 1080: '1080p', 720: '720p', 480: '480p', 360: '360p' };
                 for (var i = 0; i < mp4Qualities.length; i++) {
                   var qLabel = qualityLabels[mp4Qualities[i]] || mp4Qualities[i] + 'p';
-                  play.quality[qLabel] = WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i];
+                  play.quality[qLabel] = {
+                    url: WORKER_URL + '/?oid=' + best.owner_id + '&vid=' + best.video_id + '&stream=1&qual=mp4_' + mp4Qualities[i],
+                    type: 'mp4'
+                  };
                 }
               }
 
@@ -1463,6 +1489,7 @@
               play.timeline = timeline;
 
               addToHistory(movie);
+              Lampa.Player.stop();
               Lampa.Player.play(play);
               Lampa.Player.playlist([play]);
               done(true);
