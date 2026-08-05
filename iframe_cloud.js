@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.5');
+  console.log('[MovieZone] Loading v5.77.6');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -1151,6 +1151,9 @@
     setTimeout(function() {
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
+      setTimeout(function() {
+        try { Lampa.Player.toggle(); } catch(e) {}
+      }, 200);
     }, 50);
 
     setupPlayerBack();
@@ -1697,6 +1700,26 @@
     }
   }
 
+  function showDebugLogs() {
+    var logs = window.__iframe_cloud_logs || [];
+    var items = logs.map(function(log) {
+      var time = new Date(log.t).toLocaleTimeString();
+      return {
+        title: '[' + log.type.toUpperCase() + '] ' + time + ' — ' + log.msg,
+        subtitle: log.data ? JSON.stringify(log.data).substring(0, 120) : '',
+        _log: log
+      };
+    });
+
+    if (!items.length) items.push({ title: 'Логи пусты', subtitle: 'Сделайте действие и попробуйте снова' });
+
+    Lampa.Select.show({
+      title: PLUGIN_NAME + ' — Логи (' + logs.length + ')',
+      items: items,
+      onBack: function() { Lampa.Timeline.show(); }
+    });
+  }
+
   var buttonAdded = false;
 
   function tryAddButton() {
@@ -1722,8 +1745,19 @@
 
     Lampa.Manifest.plugins = {
       type: 'video', version: '5.28.0', name: PLUGIN_NAME, description: 'VK Video', component: 'iframe_cloud',
-      onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
-      onContextLauch: function(obj) { openPlugin(obj); }
+      onContextMenu: function(obj) {
+        return [
+          { name: 'Watch in ' + PLUGIN_NAME, description: '' },
+          { name: 'Логи MovieZone', description: 'Просмотр логов' }
+        ];
+      },
+      onContextLauch: function(obj, item) {
+        if (item && item.name === 'Логи MovieZone') {
+          showDebugLogs();
+        } else {
+          openPlugin(obj);
+        }
+      }
     };
 
     Lampa.Listener.follow('full', function(e) {
