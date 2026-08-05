@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.14');
+  console.log('[MovieZone] Loading v5.77.15');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -922,51 +922,77 @@
 
         addToHistory(movie);
 
+        var kinogoUrl = play.url;
+
         try { Lampa.Player.clear(); } catch(e) {}
         try { Lampa.Player.stop(); } catch(e) {}
-        setTimeout(function() {
-          debugLog('log', 'playKinogoEmbed: calling Lampa.Player.play()', { url: play.url.substring(0, 80) });
-          Lampa.Player.play(play);
-          Lampa.Player.playlist([play]);
-          Lampa.Player.open();
 
-          if (typeof Hls !== 'undefined') {
-            setTimeout(function() {
-              var el = document.querySelector('video');
-              if (!el) { debugLog('error', 'playKinogoEmbed: no <video> element'); return; }
-              debugLog('info', 'playKinogoEmbed: attaching hls.js directly');
-              try {
-                var hls = new Hls({
-                  enableWorker: true,
-                  lowLatencyMode: false,
-                  maxBufferLength: 30,
-                  xhrSetup: function(xhr, reqUrl) {
-                    xhr.withCredentials = false;
-                  }
-                });
-                hls.loadSource(play.url);
-                hls.attachMedia(el);
-                hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                  debugLog('info', 'playKinogoEmbed: hls.js MANIFEST_PARSED');
-                  el.play().catch(function(e) { debugLog('warn', 'playKinogoEmbed: autoplay blocked', { error: e.message }); });
-                });
-                hls.on(Hls.Events.ERROR, function(event, data) {
-                  debugLog('error', 'playKinogoEmbed: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
-                  if (data.fatal) {
-                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                      hls.startLoad();
-                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                      hls.recoverMediaError();
-                    }
-                  }
-                });
-                window._iframe_cloud_hls_kinogo = hls;
-              } catch(e) {
-                debugLog('error', 'playKinogoEmbed: hls.js attach failed', { error: e.message });
-              }
-            }, 1000);
-          }
+        var dummyPlay = {
+          url: 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAhtZGF0AAAA1m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidWR0YQAAAFptZGF0AAAAEgFAAIEEAAIBAgIABggCAAKCwkJCRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbA==',
+          type: 'mp4',
+          title: play.title
+        };
+
+        setTimeout(function() {
+          debugLog('log', 'playKinogoEmbed: opening player UI with dummy');
+          Lampa.Player.play(dummyPlay);
+          Lampa.Player.playlist([dummyPlay]);
+          Lampa.Player.open();
         }, 50);
+
+        setTimeout(function() {
+          if (typeof Hls === 'undefined') {
+            debugLog('error', 'playKinogoEmbed: Hls not available globally');
+            return;
+          }
+
+          var el = document.querySelector('video');
+          if (!el) {
+            debugLog('error', 'playKinogoEmbed: no <video> element found');
+            return;
+          }
+
+          debugLog('info', 'playKinogoEmbed: attaching our hls.js', { url: kinogoUrl.substring(0, 80) });
+
+          try {
+            if (window._iframe_cloud_hls_kinogo) {
+              window._iframe_cloud_hls_kinogo.destroy();
+              window._iframe_cloud_hls_kinogo = null;
+            }
+          } catch(e) {}
+
+          var hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false,
+            maxBufferLength: 30,
+            xhrSetup: function(xhr) {
+              xhr.withCredentials = false;
+            }
+          });
+
+          hls.loadSource(kinogoUrl);
+          hls.attachMedia(el);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            debugLog('info', 'playKinogoEmbed: hls.js MANIFEST_PARSED');
+            el.play().catch(function(e) {
+              debugLog('warn', 'playKinogoEmbed: autoplay blocked', { error: e.message });
+            });
+          });
+
+          hls.on(Hls.Events.ERROR, function(event, data) {
+            debugLog('error', 'playKinogoEmbed: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
+            if (data.fatal) {
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad();
+              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                hls.recoverMediaError();
+              }
+            }
+          });
+
+          window._iframe_cloud_hls_kinogo = hls;
+        }, 1500);
 
         setupPlayerBack();
 
@@ -1186,9 +1212,11 @@
       label: label
     });
 
+    var dummyUrl = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAhtZGF0AAAA1m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidWR0YQAAAFptZGF0AAAAEgFAAIEEAAIBAgIABggCAAKCwkJCRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbA==';
+
     var video = {
-      url: url,
-      type: playType,
+      url: dummyUrl,
+      type: 'mp4',
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
@@ -1214,75 +1242,71 @@
       addToHistory(movie);
     }
 
-    try { Lampa.Player.clear(); } catch(e) { debugLog('warn', 'Player.clear failed', { error: e.message }); }
-    try { Lampa.Player.stop(); } catch(e) { debugLog('warn', 'Player.stop failed', { error: e.message }); }
-
-    var onErrorFired = false;
-    function onError() {
-      if (onErrorFired) return;
-      onErrorFired = true;
-      debugLog('warn', 'Collaps playback error, trying fallback');
-      if (window._iframe_cloud_collaps_hls_url) {
-        debugLog('info', 'Switching to HLS fallback');
-        playCollapsHls(window._iframe_cloud_collaps_hls_url, qualityLabel, title, movie, audioNames, subtitles);
-      }
-    }
-
-    if (typeof Lampa.Player.on === 'function') {
-      Lampa.Player.on('error', onError);
-    }
+    try { Lampa.Player.clear(); } catch(e) {}
+    try { Lampa.Player.stop(); } catch(e) {}
 
     setTimeout(function() {
-      debugLog('log', 'playCollapsStream: calling Lampa.Player.play()');
+      debugLog('log', 'playCollapsStream: opening player UI with dummy');
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
-      debugLog('log', 'playCollapsStream: calling Lampa.Player.open()');
       Lampa.Player.open();
-
-      if (typeof Hls !== 'undefined') {
-        setTimeout(function() {
-          var el = document.querySelector('video');
-          if (!el) { debugLog('error', 'playCollapsStream: no <video> element'); return; }
-          debugLog('info', 'playCollapsStream: attaching hls.js directly');
-          try {
-            var hls = new Hls({
-              enableWorker: true,
-              lowLatencyMode: false,
-              maxBufferLength: 30,
-              xhrSetup: function(xhr, reqUrl) {
-                xhr.withCredentials = false;
-              }
-            });
-            hls.loadSource(url);
-            hls.attachMedia(el);
-            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-              debugLog('info', 'playCollapsStream: hls.js MANIFEST_PARSED');
-              el.play().catch(function(e) { debugLog('warn', 'playCollapsStream: autoplay blocked', { error: e.message }); });
-            });
-            hls.on(Hls.Events.ERROR, function(event, data) {
-              debugLog('error', 'playCollapsStream: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
-              if (data.fatal) {
-                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                  debugLog('info', 'playCollapsStream: hls.js trying to recover from network error');
-                  hls.startLoad();
-                } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                  debugLog('info', 'playCollapsStream: hls.js trying to recover from media error');
-                  hls.recoverMediaError();
-                }
-              }
-            });
-            window._iframe_cloud_hls = hls;
-          } catch(e) {
-            debugLog('error', 'playCollapsStream: hls.js attach failed', { error: e.message });
-          }
-        }, 1000);
-      } else {
-        debugLog('warn', 'playCollapsStream: hls.js not available, using Lampa default');
-        setTimeout(function() {
-          try { Lampa.Player.toggle(); } catch(e) {}
-        }, 200);
-      }
     }, 50);
+
+    setTimeout(function() {
+      if (typeof Hls === 'undefined') {
+        debugLog('error', 'playCollapsStream: Hls not available globally');
+        return;
+      }
+
+      var el = document.querySelector('video');
+      if (!el) {
+        debugLog('error', 'playCollapsStream: no <video> element found');
+        return;
+      }
+
+      debugLog('info', 'playCollapsStream: attaching our hls.js', { url: url.substring(0, 80) });
+
+      try {
+        if (window._iframe_cloud_hls) {
+          window._iframe_cloud_hls.destroy();
+          window._iframe_cloud_hls = null;
+        }
+      } catch(e) {}
+
+      var hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        maxBufferLength: 30,
+        xhrSetup: function(xhr) {
+          xhr.withCredentials = false;
+        }
+      });
+
+      hls.loadSource(url);
+      hls.attachMedia(el);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        debugLog('info', 'playCollapsStream: hls.js MANIFEST_PARSED');
+        el.play().catch(function(e) {
+          debugLog('warn', 'playCollapsStream: autoplay blocked', { error: e.message });
+        });
+      });
+
+      hls.on(Hls.Events.ERROR, function(event, data) {
+        debugLog('error', 'playCollapsStream: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            debugLog('info', 'playCollapsStream: hls.js network error, starting load');
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            debugLog('info', 'playCollapsStream: hls.js media error, recovering');
+            hls.recoverMediaError();
+          }
+        }
+      });
+
+      window._iframe_cloud_hls = hls;
+    }, 1500);
 
     setTimeout(function() {
       if (typeof Lampa.Player.off === 'function') {
