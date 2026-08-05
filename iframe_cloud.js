@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.15');
+  console.log('[MovieZone] Loading v5.77.16');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -961,14 +961,7 @@
             }
           } catch(e) {}
 
-          var hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: false,
-            maxBufferLength: 30,
-            xhrSetup: function(xhr) {
-              xhr.withCredentials = false;
-            }
-          });
+          var hls = createProxiedHls(['cinemap.cc', 'v206.cinemap.cc', 'iframe-cloud-proxy.vercel.app']);
 
           hls.loadSource(kinogoUrl);
           hls.attachMedia(el);
@@ -1094,6 +1087,50 @@
 
     overlay.append(iframe).append(closeBtn);
     $('body').append(overlay);
+  }
+
+  /* ---- Create hls.js with proxied loaders ---- */
+
+  function createProxiedHls(proxyDomains) {
+    if (typeof Hls === 'undefined') return null;
+
+    function shouldProxy(url) {
+      if (!url) return false;
+      for (var i = 0; i < proxyDomains.length; i++) {
+        if (url.indexOf(proxyDomains[i]) !== -1) return true;
+      }
+      return false;
+    }
+
+    function proxiedUrl(url) {
+      return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
+    }
+
+    function makeLoader(BaseLoader) {
+      return function(config) {
+        var loader = new BaseLoader(config);
+        var origLoad = loader.load.bind(loader);
+        loader.load = function(context, cfg, callbacks) {
+          if (context && context.url && shouldProxy(context.url)) {
+            debugLog('log', 'hls proxied', { url: context.url.substring(0, 60) + '...' });
+            context.url = proxiedUrl(context.url);
+          }
+          return origLoad(context, cfg, callbacks);
+        };
+        return loader;
+      };
+    }
+
+    return new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      maxBufferLength: 30,
+      xhrSetup: function(xhr) {
+        xhr.withCredentials = false;
+      },
+      pLoader: makeLoader(Hls.DefaultConfig.pLoader),
+      fLoader: makeLoader(Hls.DefaultConfig.fLoader)
+    });
   }
 
   /* ---- Collaps proxy ---- */
@@ -1273,14 +1310,7 @@
         }
       } catch(e) {}
 
-      var hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 30,
-        xhrSetup: function(xhr) {
-          xhr.withCredentials = false;
-        }
-      });
+      var hls = createProxiedHls(['interkh.com', 'cinemap.cc']);
 
       hls.loadSource(url);
       hls.attachMedia(el);
