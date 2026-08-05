@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.76.3');
+  console.log('[MovieZone] Loading v5.76.4');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -897,6 +897,14 @@
     };
     
     window.addEventListener('hashchange', cleanupHandler);
+
+    try {
+      if (Lampa.Player && typeof Lampa.Player.on === 'function') {
+        Lampa.Player.on('close', function() {
+          try { Lampa.Controller.toggle('content'); } catch (err) {}
+        });
+      }
+    } catch (err) {}
   }
 
   /* ---- iframe fallback (for non-ortified players or failures) ---- */
