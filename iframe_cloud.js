@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.2');
+  console.log('[MovieZone] Loading v5.77.3');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -41,9 +41,8 @@
 
     console.log(PLUGIN_NAME + ' [' + type + ']: ' + msg, data || '');
   }
-  var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
-  var KP_API_TOKEN = 'WYVHF8M-XKBM92B-JD2ZQ8R-EPZ37AQ';
-  var IFRAME_CLOUD_API = 'https://iframe.cloud/lampac-api.php';
+  var KP_API_BASE = '';  // api.kinopoisk.dev token expired — disabled
+  var KP_API_TOKEN = '';
   var KPU_API = 'https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword';
 
   function proxy(url) {
