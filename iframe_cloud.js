@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.6');
+  console.log('[MovieZone] Loading v5.77.7');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -1096,6 +1096,8 @@
           return;
         }
 
+        var hlsUrl = collapseProxy(data.hls);
+        window._iframe_cloud_collaps_hls_url = hlsUrl;
         streamUrl = collapseProxy(streamUrl);
         var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
 
@@ -1148,6 +1150,22 @@
 
     Lampa.Player.clear();
     Lampa.Player.stop();
+
+    var onErrorFired = false;
+    function onError() {
+      if (onErrorFired) return;
+      onErrorFired = true;
+      debugLog('warn', 'Collaps playback error, trying fallback');
+      if (window._iframe_cloud_collaps_hls_url) {
+        debugLog('info', 'Switching to HLS fallback');
+        playCollapsHls(window._iframe_cloud_collaps_hls_url, qualityLabel, title, movie, audioNames, subtitles);
+      }
+    }
+
+    if (typeof Lampa.Player.on === 'function') {
+      Lampa.Player.on('error', onError);
+    }
+
     setTimeout(function() {
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
@@ -1155,6 +1173,12 @@
         try { Lampa.Player.toggle(); } catch(e) {}
       }, 200);
     }, 50);
+
+    setTimeout(function() {
+      if (typeof Lampa.Player.off === 'function') {
+        Lampa.Player.off('error', onError);
+      }
+    }, 5000);
 
     setupPlayerBack();
 
@@ -1191,6 +1215,11 @@
         else el.addEventListener('loadedmetadata', doRestore);
       }, 1500);
     }
+  }
+
+  function playCollapsHls(hlsUrl, qualityLabel, title, movie, audioNames, subtitles) {
+    debugLog('log', 'playCollapsHls: fallback', { hlsUrl: hlsUrl, qualityLabel: qualityLabel });
+    playHlsProxied(hlsUrl, PLUGIN_NAME + ' ' + qualityLabel + ' — ' + title, movie, 'Collaps', audioNames);
   }
 
   function showCollapsEpisodeSelector(episodes, title, movie, audioNames, subtitles) {
@@ -1688,12 +1717,16 @@
     btn.on('hover:enter click', function() { openPlugin(movie); });
     render.after(btn);
 
+    var logsBtn = $('<div class="full-start__button selector iframe-logs-btn"><span>Логи</span></div>');
+    logsBtn.on('click', function() { showDebugLogs(); });
+    btn.after(logsBtn);
+
     try {
       var hash = getTimelineHash(movie);
       var timeline = Lampa.Timeline.view(hash);
       if (timeline && timeline.time > 0) {
         var tl = Lampa.Timeline.render(timeline);
-        if (tl) btn.after(tl);
+        if (tl) logsBtn.after(tl);
       }
     } catch (e) {
       console.log('[iframe-cloud] Timeline render error:', e.message);
@@ -1745,19 +1778,8 @@
 
     Lampa.Manifest.plugins = {
       type: 'video', version: '5.28.0', name: PLUGIN_NAME, description: 'VK Video', component: 'iframe_cloud',
-      onContextMenu: function(obj) {
-        return [
-          { name: 'Watch in ' + PLUGIN_NAME, description: '' },
-          { name: 'Логи MovieZone', description: 'Просмотр логов' }
-        ];
-      },
-      onContextLauch: function(obj, item) {
-        if (item && item.name === 'Логи MovieZone') {
-          showDebugLogs();
-        } else {
-          openPlugin(obj);
-        }
-      }
+      onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
+      onContextLauch: function(obj) { openPlugin(obj); }
     };
 
     Lampa.Listener.follow('full', function(e) {
