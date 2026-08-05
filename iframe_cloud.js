@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.11');
+  console.log('[MovieZone] Loading v5.77.12');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -876,46 +876,61 @@
         return { language: t.name, label: '', extra: {} };
       });
 
-      var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : multiUrl;
+      var masterUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : multiUrl;
 
-      var play = {
-        url: videoUrl,
-        type: 'm3u8',
-        title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
-        subtitles: [],
-        translate: tracks.length ? { tracks: tracks } : undefined
-      };
+      debugLog('info', 'playKinogoEmbed: fetching master m3u8', { url: masterUrl.substring(0, 80) + '...' });
 
-      var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
-      if (firstSubs) {
-        play.subtitles = parseSubtitles(firstSubs);
-      }
+      return fetchText(masterUrl).then(function(m3u8Text) {
+        var vercelPattern = 'iframe-cloud-proxy.vercel.app/api/proxy?url=';
+        var workerPattern = WORKER_URL.substring(8) + '/?proxy=';
 
-      var hash = getTimelineHash(movie, 'Kinogo');
-      var timeline = Lampa.Timeline.view(hash);
-      play.timeline = timeline;
+        if (m3u8Text.indexOf('iframe-cloud-proxy.vercel.app') !== -1) {
+          m3u8Text = m3u8Text.replace(/https:\/\/iframe-cloud-proxy\.vercel\.app\/api\/proxy\?url=/g, WORKER_URL + '/?proxy=');
+          debugLog('info', 'playKinogoEmbed: rewrote Vercel→Worker proxy URLs in m3u8');
+        }
 
-      var beholdHash = getBeholdHash(movie, 'Kinogo');
-      markViewed(beholdHash);
+        var blob = new Blob([m3u8Text], { type: 'application/vnd.apple.mpegurl' });
+        var videoUrl = URL.createObjectURL(blob);
+        debugLog('info', 'playKinogoEmbed: blob URL created', { videoUrl: videoUrl.substring(0, 60) + '...' });
 
-      window._iframe_cloud_current = {
-        timeline: timeline,
-        beholdHash: beholdHash,
-        movie: movie,
-        label: 'Kinogo'
-      };
+        var play = {
+          url: videoUrl,
+          type: 'm3u8',
+          title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
+          subtitles: [],
+          translate: tracks.length ? { tracks: tracks } : undefined
+        };
 
-      addToHistory(movie);
+        var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
+        if (firstSubs) {
+          play.subtitles = parseSubtitles(firstSubs);
+        }
 
-      try { Lampa.Player.clear(); } catch(e) {}
-      try { Lampa.Player.stop(); } catch(e) {}
-      setTimeout(function() {
-        Lampa.Player.play(play);
-        Lampa.Player.playlist([play]);
-        Lampa.Player.open();
-      }, 50);
+        var hash = getTimelineHash(movie, 'Kinogo');
+        var timeline = Lampa.Timeline.view(hash);
+        play.timeline = timeline;
 
-      setupPlayerBack();
+        var beholdHash = getBeholdHash(movie, 'Kinogo');
+        markViewed(beholdHash);
+
+        window._iframe_cloud_current = {
+          timeline: timeline,
+          beholdHash: beholdHash,
+          movie: movie,
+          label: 'Kinogo'
+        };
+
+        addToHistory(movie);
+
+        try { Lampa.Player.clear(); } catch(e) {}
+        try { Lampa.Player.stop(); } catch(e) {}
+        setTimeout(function() {
+          Lampa.Player.play(play);
+          Lampa.Player.playlist([play]);
+          Lampa.Player.open();
+        }, 50);
+
+        setupPlayerBack();
 
       setTimeout(function() {
         var el = document.querySelector('video');
@@ -948,6 +963,7 @@
         else el.addEventListener('loadedmetadata', doRestore);
       }, 1500);
 
+      });
     }).catch(function(e) {
       console.log('[iframe-cloud] Kinogo info error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
@@ -1082,8 +1098,8 @@
                 season: season.season,
                 episode: ep.episode,
                 title: ep.title || ('S' + season.season + 'E' + ep.episode),
-                url: collapseProxy(ep.dash || ep.hls),
-                quality: ep.dash ? '1080p DASH' : '720p HLS',
+                url: ep.hls || ep.dash,
+                quality: ep.hls ? '720p HLS' : '1080p DASH',
                 audio: ep.audio && ep.audio.length ? ep.audio : audioNames
               });
             });
@@ -1100,9 +1116,7 @@
           return;
         }
 
-        var hlsUrl = collapseProxy(data.hls || streamUrl);
-        window._iframe_cloud_collaps_hls_url = hlsUrl;
-        streamUrl = hlsUrl;
+        window._iframe_cloud_collaps_hls_url = streamUrl;
         var qualityLabel = '720p HLS';
 
         debugLog('info', 'playCollapsStream: starting', {
