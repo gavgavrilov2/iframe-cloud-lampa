@@ -1,13 +1,46 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.0');
+  console.log('[MovieZone] Loading v5.77.2');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
 
+  var DEBUG_ENABLED = true;
+  var LOG_LEVEL = 'debug';
 
   var IFRAME_CLOUD_BASE = 'https://iframe.cloud/iframe/';
+
+  window.__iframe_cloud_logs = window.__iframe_cloud_logs || [];
+  try {
+    var savedLogs = localStorage.getItem('iframe_cloud_debug');
+    if (savedLogs) window.__iframe_cloud_logs = JSON.parse(savedLogs);
+  } catch(e) {}
+
+  function debugLog(type, msg, data) {
+    if (!DEBUG_ENABLED) return;
+
+    var levels = { error: 0, warn: 1, info: 2, log: 3, debug: 4 };
+    if (levels[type] > levels[LOG_LEVEL]) return;
+
+    var entry = {
+      t: Date.now(),
+      type: type,
+      msg: msg
+    };
+
+    if (data !== undefined) entry.data = data;
+
+    window.__iframe_cloud_logs.push(entry);
+    if (window.__iframe_cloud_logs.length > 500)
+      window.__iframe_cloud_logs.shift();
+
+    try {
+      localStorage.setItem('iframe_cloud_debug', JSON.stringify(window.__iframe_cloud_logs));
+    } catch(e) {}
+
+    console.log(PLUGIN_NAME + ' [' + type + ']: ' + msg, data || '');
+  }
   var KP_API_BASE = 'https://api.kinopoisk.dev/v1.4/movie';
   var KP_API_TOKEN = 'WYVHF8M-XKBM92B-JD2ZQ8R-EPZ37AQ';
   var IFRAME_CLOUD_API = 'https://iframe.cloud/lampac-api.php';
@@ -22,14 +55,31 @@
   }
 
   function fetchText(url) {
+    debugLog('debug', 'fetch: ' + url, { method: 'GET' });
     return window.fetch(url).then(function(r) {
+      debugLog('debug', 'fetch done: ' + url, { status: r.status, ok: r.ok });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
+    }).catch(function(e) {
+      debugLog('error', 'fetch failed: ' + url, { error: e.message });
+      throw e;
     });
   }
 
   function fetchJson(url) {
-    return fetchText(url).then(function(t) { return JSON.parse(t); });
+    return fetchText(url).then(function(t) {
+      try {
+        var data = JSON.parse(t);
+        debugLog('debug', 'fetchJson success: ' + url, { result: data });
+        return data;
+      } catch(parseErr) {
+        debugLog('error', 'JSON parse error: ' + url, { error: parseErr.message, text: t.substring(0, 200) });
+        throw parseErr;
+      }
+    }).catch(function(err) {
+      debugLog('error', 'fetchJson failed: ' + url, { error: err.message });
+      throw err;
+    });
   }
 
   function fetchJsonViaProxy(url) {
@@ -599,10 +649,13 @@
     var year = getYear(movie);
     var query = title + (year ? ' ' + year : '');
 
+  debugLog('log', 'searchAndPlayVk: ' + query, { title: title, year: year });
     Lampa.Noty.show(PLUGIN_NAME + ': ' + title);
 
     fetchJson(WORKER_URL + '/?vksearch=' + encodeURIComponent(query) + '&year=' + (year || '')).then(function(data) {
       var videos = data.videos || [];
+
+      debugLog('info', 'VK search result: ' + query, { count: videos.length });
 
       if (!videos.length) {
         Lampa.Noty.show(PLUGIN_NAME + ': ничего не найдено');
@@ -755,10 +808,13 @@
     var title = movie.title || movie.original_title || movie.name || '';
     var year = getYear(movie);
 
+  debugLog('log', 'searchAndPlayKinogo: ' + title, { year: year });
     Lampa.Noty.show(PLUGIN_NAME + ': поиск ' + title + '...');
 
     fetchJson(WORKER_URL + '/?kinogo_search=' + encodeURIComponent(title)).then(function(data) {
       var results = data.results || [];
+
+      debugLog('info', 'Kinogo search result: ' + title, { count: results.length });
 
       if (!results.length) {
         Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ничего не найдено');
@@ -774,6 +830,7 @@
       }
       if (!best) best = results[0];
 
+      debugLog('info', 'Kinogo best match: ' + title, { selected: best.title, year: best.year, url: best.url });
 
       Lampa.Noty.show(PLUGIN_NAME + ': выбрано: ' + best.title + ' (' + (best.year || '?') + ')');
 
@@ -1001,8 +1058,10 @@
   /* ---- Collaps Direct API: DASH 1080p ---- */
 
   function playCollapsDirect(kpId, title, movie) {
+    debugLog('log', 'playCollapsDirect: kpId=' + kpId, { title: title });
     return new Promise(function(resolve, reject) {
       fetchJson(WORKER_URL + '/?collaps_direct=' + kpId).then(function(data) {
+        debugLog('info', 'Collaps API result: kpId=' + kpId, { type: data.type, hasSeasons: !!(data.seasons && data.seasons.length) });
         if (data.error) {
           reject(new Error(data.error));
           return;
