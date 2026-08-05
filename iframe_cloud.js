@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.9');
+  console.log('[MovieZone] Loading v5.77.10');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -1094,16 +1094,16 @@
           return;
         }
 
-        var streamUrl = data.dash || data.hls;
+        var streamUrl = data.hls || data.dash;
         if (!streamUrl) {
           reject(new Error('No stream URL'));
           return;
         }
 
-        var hlsUrl = collapseProxy(data.hls);
+        var hlsUrl = collapseProxy(data.hls || streamUrl);
         window._iframe_cloud_collaps_hls_url = hlsUrl;
-        streamUrl = collapseProxy(streamUrl);
-        var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
+        streamUrl = hlsUrl;
+        var qualityLabel = '720p HLS';
 
         debugLog('info', 'playCollapsStream: starting', {
           streamUrl: streamUrl.substring(0, 80) + '...',
@@ -1124,7 +1124,13 @@
   function playCollapsStream(url, qualityLabel, title, movie, audioNames, subtitles) {
     var label = 'Collaps ' + qualityLabel;
 
-    var playType = qualityLabel.indexOf('DASH') !== -1 ? 'mp4' : 'm3u8';
+    var playType = 'm3u8';
+
+    debugLog('info', 'playCollapsStream: creating video object', {
+      url: url.substring(0, 80) + '...',
+      type: playType,
+      label: label
+    });
 
     var video = {
       url: url,
@@ -1173,8 +1179,10 @@
     }
 
     setTimeout(function() {
+      debugLog('log', 'playCollapsStream: calling Lampa.Player.play()');
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
+      debugLog('log', 'playCollapsStream: calling Lampa.Player.open()');
       Lampa.Player.open();
       setTimeout(function() {
         try { Lampa.Player.toggle(); } catch(e) {}
