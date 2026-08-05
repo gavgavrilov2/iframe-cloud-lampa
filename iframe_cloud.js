@@ -337,9 +337,9 @@
     try { Lampa.Player.clear(); } catch(e) { debugLog('warn', 'Player.clear failed', { error: e.message }); }
     try { Lampa.Player.stop(); } catch(e) { debugLog('warn', 'Player.stop failed', { error: e.message }); }
         setTimeout(function() {
-          Lampa.Player.play(video);
-          Lampa.Player.playlist([video]);
-          Lampa.Player.open();
+          try { Lampa.Player.play(video); } catch(e) {}
+          try { Lampa.Player.playlist([video]); } catch(e) {}
+          try { Lampa.Player.open(); } catch(e) {}
         }, 50);
 
         setupPlayerBack();
@@ -375,9 +375,9 @@
           else el.addEventListener('loadedmetadata', doRestore);
         }, 1500);
       } else {
-        Lampa.Player.play(video);
-        Lampa.Player.playlist([video]);
-        Lampa.Player.open();
+        try { Lampa.Player.play(video); } catch(e) {}
+        try { Lampa.Player.playlist([video]); } catch(e) {}
+        try { Lampa.Player.open(); } catch(e) {}
         setupPlayerBack();
       }
     }
@@ -748,9 +748,9 @@
     try { Lampa.Player.clear(); } catch(e) {}
     try { Lampa.Player.stop(); } catch(e) {}
     setTimeout(function() {
-      Lampa.Player.play(play);
-      Lampa.Player.playlist([play]);
-      Lampa.Player.open();
+      try { Lampa.Player.play(play); } catch(e) {}
+      try { Lampa.Player.playlist([play]); } catch(e) {}
+      try { Lampa.Player.open(); } catch(e) {}
     }, 50);
 
     setupPlayerBack();
@@ -935,9 +935,9 @@
 
         setTimeout(function() {
           debugLog('log', 'playKinogoEmbed: opening player UI with dummy');
-          Lampa.Player.play(dummyPlay);
-          Lampa.Player.playlist([dummyPlay]);
-          Lampa.Player.open();
+          try { Lampa.Player.play(dummyPlay); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.play error', { error: e.message }); }
+          try { Lampa.Player.playlist([dummyPlay]); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.playlist error', { error: e.message }); }
+          try { Lampa.Player.open(); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.open error', { error: e.message }); }
         }, 50);
 
         setTimeout(function() {
@@ -1107,13 +1107,15 @@
     }
 
     function makeLoader(BaseLoader) {
+      if (!BaseLoader) return undefined;
       return function(config) {
         var loader = new BaseLoader(config);
         var origLoad = loader.load.bind(loader);
         loader.load = function(context, cfg, callbacks) {
           if (context && context.url && shouldProxy(context.url)) {
-            debugLog('log', 'hls proxied', { url: context.url.substring(0, 60) + '...' });
+            var orig = context.url.substring(0, 80);
             context.url = proxiedUrl(context.url);
+            debugLog('log', 'hls proxied: ' + orig + ' → proxy', { newUrl: context.url.substring(0, 80) + '...' });
           }
           return origLoad(context, cfg, callbacks);
         };
@@ -1121,16 +1123,25 @@
       };
     }
 
-    return new Hls({
+    var pLoader = makeLoader(Hls.DefaultConfig.pLoader);
+    var fLoader = makeLoader(Hls.DefaultConfig.fLoader);
+
+    if (!pLoader) debugLog('warn', 'createProxiedHls: pLoader not available, manifest requests unproxied');
+    if (!fLoader) debugLog('warn', 'createProxiedHls: fLoader not available, segment requests unproxied');
+
+    var hlsConfig = {
       enableWorker: true,
       lowLatencyMode: false,
       maxBufferLength: 30,
-      xhrSetup: function(xhr) {
+      xhrSetup: function(xhr, url) {
         xhr.withCredentials = false;
-      },
-      pLoader: makeLoader(Hls.DefaultConfig.pLoader),
-      fLoader: makeLoader(Hls.DefaultConfig.fLoader)
-    });
+      }
+    };
+
+    if (pLoader) hlsConfig.pLoader = pLoader;
+    if (fLoader) hlsConfig.fLoader = fLoader;
+
+    return new Hls(hlsConfig);
   }
 
   /* ---- Collaps proxy ---- */
@@ -1284,9 +1295,9 @@
 
     setTimeout(function() {
       debugLog('log', 'playCollapsStream: opening player UI with dummy');
-      Lampa.Player.play(video);
-      Lampa.Player.playlist([video]);
-      Lampa.Player.open();
+      try { Lampa.Player.play(video); } catch(e) { debugLog('error', 'playCollapsStream: Player.play error', { error: e.message }); }
+      try { Lampa.Player.playlist([video]); } catch(e) { debugLog('error', 'playCollapsStream: Player.playlist error', { error: e.message }); }
+      try { Lampa.Player.open(); } catch(e) { debugLog('error', 'playCollapsStream: Player.open error', { error: e.message }); }
     }, 50);
 
     setTimeout(function() {
@@ -1750,9 +1761,9 @@
 
               addToHistory(movie);
               try { Lampa.Player.stop(); } catch(e) {}
-              Lampa.Player.play(play);
-              Lampa.Player.playlist([play]);
-              Lampa.Player.open();
+              try { Lampa.Player.play(play); } catch(e) {}
+              try { Lampa.Player.playlist([play]); } catch(e) {}
+              try { Lampa.Player.open(); } catch(e) {}
               done(true);
             }).catch(function() { done(false); });
           }).catch(function() { done(false); });
@@ -1914,7 +1925,7 @@
     Lampa.Select.show({
       title: PLUGIN_NAME + ' — Логи (' + logs.length + ')',
       items: items,
-      onBack: function() { Lampa.Timeline.show(); }
+      onBack: function() { try { Lampa.Timeline.show(); } catch(e) { Lampa.Controller.toggle('content'); } }
     });
   }
 
