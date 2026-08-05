@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.8');
+  console.log('[MovieZone] Loading v5.77.9');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -339,6 +339,7 @@
         setTimeout(function() {
           Lampa.Player.play(video);
           Lampa.Player.playlist([video]);
+          Lampa.Player.open();
         }, 50);
 
         setupPlayerBack();
@@ -376,6 +377,7 @@
       } else {
         Lampa.Player.play(video);
         Lampa.Player.playlist([video]);
+        Lampa.Player.open();
         setupPlayerBack();
       }
     }
@@ -748,6 +750,7 @@
     setTimeout(function() {
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
+      Lampa.Player.open();
     }, 50);
 
     setupPlayerBack();
@@ -909,6 +912,7 @@
       setTimeout(function() {
         Lampa.Player.play(play);
         Lampa.Player.playlist([play]);
+        Lampa.Player.open();
       }, 50);
 
       setupPlayerBack();
@@ -1120,9 +1124,11 @@
   function playCollapsStream(url, qualityLabel, title, movie, audioNames, subtitles) {
     var label = 'Collaps ' + qualityLabel;
 
+    var playType = qualityLabel.indexOf('DASH') !== -1 ? 'mp4' : 'm3u8';
+
     var video = {
       url: url,
-      type: 'mp4',
+      type: playType,
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
@@ -1169,6 +1175,7 @@
     setTimeout(function() {
       Lampa.Player.play(video);
       Lampa.Player.playlist([video]);
+      Lampa.Player.open();
       setTimeout(function() {
         try { Lampa.Player.toggle(); } catch(e) {}
       }, 200);
@@ -1588,6 +1595,7 @@
               Lampa.Player.stop();
               Lampa.Player.play(play);
               Lampa.Player.playlist([play]);
+              Lampa.Player.open();
               done(true);
             }).catch(function() { done(false); });
           }).catch(function() { done(false); });
