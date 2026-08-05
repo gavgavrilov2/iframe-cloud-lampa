@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.76.2');
+  console.log('[MovieZone] Loading v5.76.3');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -929,6 +929,12 @@
     $('body').append(overlay);
   }
 
+  /* ---- Collaps proxy ---- */
+
+  function collapseProxy(url) {
+    return VERCEL_PROXY_URL + '?url=' + encodeURIComponent(url) + '&referer=' + encodeURIComponent('https://kinokrad.my');
+  }
+
   /* ---- Process ortified embed ---- */
 
   function fetchTextViaVercel(targetUrl) {
@@ -989,7 +995,7 @@
                 season: season.season,
                 episode: ep.episode,
                 title: ep.title || ('S' + season.season + 'E' + ep.episode),
-                url: ep.dash || ep.hls,
+                url: collapseProxy(ep.dash || ep.hls),
                 quality: ep.dash ? '1080p DASH' : '720p HLS',
                 audio: ep.audio && ep.audio.length ? ep.audio : audioNames
               });
@@ -1007,6 +1013,7 @@
           return;
         }
 
+        streamUrl = collapseProxy(streamUrl);
         var qualityLabel = data.dash ? '1080p DASH' : '720p HLS';
         playCollapsStream(streamUrl, qualityLabel, title, movie, audioNames, subtitles);
         resolve();
