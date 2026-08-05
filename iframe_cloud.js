@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.76.4');
+  console.log('[MovieZone] Loading v5.76.5');
 
   var PLUGIN_NAME = 'MovieZone';
   var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -763,17 +763,19 @@
       if (!best) best = results[0];
 
 
-      Lampa.Noty.show(PLUGIN_NAME + ': ' + best.title + ' (' + (best.year || '?') + ')');
+      Lampa.Noty.show(PLUGIN_NAME + ': выбрано: ' + best.title + ' (' + (best.year || '?') + ')');
 
       fetchJson(WORKER_URL + '/?kinogo_page=' + encodeURIComponent(best.url)).then(function(pageData) {
         if (pageData.embedUrl) {
           var embedUrl = pageData.embedUrl;
           if (embedUrl.indexOf('//') === 0) embedUrl = 'https:' + embedUrl;
 
+          console.log('[iframe-cloud] Kinogo embedUrl:', embedUrl, 'isOrtified:', pageData.isOrtified, 'hasCinemar:', pageData.hasCinemar);
+
           if (pageData.hasCinemar && !pageData.isOrtified) {
             playKinogoEmbed(embedUrl, best, movie);
           } else if (pageData.isOrtified) {
-            playOrtified(embedUrl, 'Kinogo \u2014 ' + (best.title || ''), best.title, function() {
+            playOrtified(embedUrl, 'Kinogo — ' + (best.title || ''), best.title, function() {
               Lampa.Noty.show(PLUGIN_NAME + ': Kinogo \u2014 \u0432\u0438\u0434\u0435\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e');
             }, movie);
           } else {
