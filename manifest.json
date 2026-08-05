@@ -1,6 +1,6 @@
 {
   "type": "video",
-  "version": "5.76.0",
+  "version": "5.76.1",
   "name": "MovieZone",
   "description": "VK MP4 quality fix + Kinogo/Collaps back button fix",
   "component": "iframe_cloud",
