@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.7');
+  console.log('[MovieZone] Loading v5.77.8');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -873,7 +873,7 @@
         return { language: t.name, label: '', extra: {} };
       });
 
-      var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : (info.directM3u8 || multiUrl);
+      var videoUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : multiUrl;
 
       var play = {
         url: videoUrl,
