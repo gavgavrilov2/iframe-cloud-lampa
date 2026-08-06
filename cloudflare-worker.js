@@ -251,6 +251,13 @@ async function handleProxy(targetUrl, corsHeaders, request) {
       reqHeaders['Sec-Fetch-Mode'] = 'navigate';
     }
     var resp = await fetch(targetUrl, { headers: reqHeaders, redirect: 'follow' });
+    
+    if (isCollapsCdn) {
+      var diagHeaders = {};
+      resp.headers.forEach(function(v, k) { diagHeaders[k] = v; });
+      console.log('[Worker] Collaps fetch', JSON.stringify({ url: targetUrl.substring(0, 100), status: resp.status, respHeaders: diagHeaders, sentReferer: reqHeaders['Referer'] }));
+    }
+
     var headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Range' };
     var ct = resp.headers.get('Content-Type');
     var isM3u8 = ct && ct.indexOf('mpegurl') !== -1;

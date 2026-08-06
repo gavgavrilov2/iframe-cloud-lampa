@@ -1,6 +1,6 @@
 {
   "type": "video",
-  "version": "5.77.18",
+  "version": "5.77.19",
   "name": "MovieZone",
   "description": "Fix VK quality menu, Collaps proxy, back button on PC",
   "component": "iframe_cloud",
