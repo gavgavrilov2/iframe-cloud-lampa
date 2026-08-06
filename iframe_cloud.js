@@ -1663,12 +1663,6 @@
             subtitle: tv ? 'Недоступно для сериалов' : 'до 4K MP4',
             icon: '🎥',
             _source: 'vk'
-          },
-          {
-            title: 'Авто (Auto-fallback)',
-            subtitle: 'Kinogo → VK',
-            icon: '🤖',
-            _source: 'auto'
           }
         ];
 
@@ -1686,8 +1680,6 @@
                 return;
               }
               searchAndPlayVk(movie);
-            } else if (source === 'auto') {
-              trySourceChain(movie, kpId);
             }
           },
           onBack: function() {
