@@ -31,6 +31,9 @@ export default {
     const kinogoPage = url.searchParams.get('kinogo_page');
     const collapsEmbed = url.searchParams.get('collaps_embed');
     const collapsDirect = url.searchParams.get('collaps_direct');
+    const iframeCloudKp = url.searchParams.get('iframe_cloud_kp');
+    const iframeCloudEmbed = url.searchParams.get('iframe_cloud_embed');
+    const parseM3u8 = url.searchParams.get('parse_m3u8');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
     if (pathMatch) {
@@ -67,6 +70,18 @@ export default {
 
     if (collapsDirect) {
       return await handleCollapsDirect(collapsDirect, corsHeaders);
+    }
+
+    if (iframeCloudKp) {
+      return await handleIframeCloudKp(iframeCloudKp, corsHeaders);
+    }
+
+    if (iframeCloudEmbed) {
+      return await handleIframeCloudEmbed(iframeCloudEmbed, corsHeaders);
+    }
+
+    if (parseM3u8) {
+      return await handleParseM3u8(parseM3u8, corsHeaders);
     }
 
     if (straversUrl) {
@@ -1460,4 +1475,123 @@ async function handleCollapsDirect(kpId, corsHeaders) {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
+}
+
+/* ---- iframe.cloud: get player list by KP ID ---- */
+async function handleIframeCloudKp(kpId, corsHeaders) {
+  try {
+    var resp = await fetch('https://iframe.cloud/iframe/' + kpId, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Accept': 'text/html'
+      }
+    });
+    if (!resp.ok) {
+      return new Response(JSON.stringify({ error: 'iframe.cloud returned ' + resp.status }), {
+        status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    var html = await resp.text();
+    var players = [];
+    var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
+    var m;
+    while ((m = re.exec(html)) !== null) {
+      players.push({ name: m[2].trim(), url: m[1] });
+    }
+    return new Response(JSON.stringify({ players: players }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/* ---- iframe.cloud: parse embed player to extract makePlayer() config ---- */
+async function handleIframeCloudEmbed(encodedUrl, corsHeaders) {
+  try {
+    var playerUrl = decodeURIComponent(encodedUrl);
+    var isOrtified = playerUrl.indexOf('ortified.ws') !== -1;
+    var headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      'Accept': 'text/html'
+    };
+    if (isOrtified) {
+      headers['Origin'] = 'https://iframe.cloud';
+      headers['Referer'] = 'https://iframe.cloud/';
+    }
+    var resp = await fetch(playerUrl, { headers: headers });
+    if (!resp.ok) {
+      return new Response(JSON.stringify({ error: 'Player returned ' + resp.status, url: playerUrl }), {
+        status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    var html = await resp.text();
+    var result = parseMakePlayer(html);
+    if (!result) {
+      return new Response(JSON.stringify({ error: 'Failed to parse makePlayer', html_length: html.length }), {
+        status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify(result), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/* ---- Parse m3u8 to extract quality levels ---- */
+async function handleParseM3u8(encodedUrl, corsHeaders) {
+  try {
+    var m3u8Url = decodeURIComponent(encodedUrl);
+    var resp = await fetch(m3u8Url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Referer': new URL(m3u8Url).origin + '/'
+      }
+    });
+    if (!resp.ok) {
+      return new Response(JSON.stringify({ error: 'm3u8 fetch returned ' + resp.status }), {
+        status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    var text = await resp.text();
+    var levels = parseM3u8Levels(text);
+    return new Response(JSON.stringify({ levels: levels, raw: text }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+function parseM3u8Levels(text) {
+  if (!text) return [];
+  var lines = text.split('\n');
+  var levels = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
+      var bwMatch = line.match(/BANDWIDTH=(\d+)/);
+      var resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+      var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+      if (nextLine && nextLine.indexOf('#') !== 0) {
+        levels.push({
+          bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+          width: resMatch ? parseInt(resMatch[1]) : 0,
+          height: resMatch ? parseInt(resMatch[2]) : 0,
+          url: nextLine
+        });
+      }
+    }
+  }
+  levels.sort(function(a, b) { return b.height - a.height; });
+  return levels;
 }
