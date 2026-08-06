@@ -397,150 +397,161 @@
 
     var proxyUrl = WORKER_URL + '/?proxy=' + encodeURIComponent(hlsUrl);
 
-    function startPlayback(levels, audioTracks, subtitleTracks) {
-      var video = document.querySelector('video');
-      if (!video) {
-        video = document.createElement('video');
-        video.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:#000;';
-        document.body.appendChild(video);
+    var video = document.createElement('video');
+    video.id = 'iframe-cloud-video';
+    video.style.cssText = 'width:100%;height:100%;background:#000;';
+    video.setAttribute('playsinline', '');
+    video.setAttribute('crossorigin', 'anonymous');
+
+    var container = $('<div class="iframe-cloud-player" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;"></div>');
+    var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10001;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">\u2715 \u0417\u0430\u043a\u0440\u044b\u0442\u044c</div>');
+    var qualityBtn = $('<div style="position:absolute;top:10px;right:120px;z-index:10001;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">\u2699 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e</div>');
+    qualityBtn.hide();
+
+    var hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      maxBufferLength: 30,
+      frontBufferFlushThreshold: 30,
+      xhrSetup: function(xhr) { xhr.withCredentials = false; }
+    });
+
+    if (window._iframe_cloud_hls) {
+      try { window._iframe_cloud_hls.destroy(); } catch(e) {}
+    }
+    window._iframe_cloud_hls = hls;
+
+    var currentLevels = [];
+    var qualityMenuOpen = false;
+
+    hls.loadSource(proxyUrl);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
+      debugLog('info', 'playWithOwnHls: manifest parsed', { levels: data.levels.length });
+
+      currentLevels = data.levels.map(function(lev, i) {
+        var h = 0;
+        if (lev.height) h = lev.height;
+        else if (lev.attrs && lev.attrs.RESOLUTION) {
+          var rm = lev.attrs.RESOLUTION.split('x');
+          h = parseInt(rm[1]) || 0;
+        }
+        var lbl = h ? h + 'p' : 'Level ' + i;
+        return { index: i, label: lbl, height: h, bandwidth: lev.bitrate || 0, selected: false };
+      });
+      currentLevels.sort(function(a, b) { return b.height - a.height; });
+
+      if (currentLevels.length > 1) {
+        qualityBtn.show();
+        var autoLevel = hls.currentLevel >= 0 ? currentLevels.find(function(l) { return l.index === hls.currentLevel; }) : null;
+        qualityBtn.text('\u2699 ' + (autoLevel ? autoLevel.label : 'Auto'));
       }
 
-      var hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 30,
-        frontBufferFlushThreshold: 30,
-        xhrSetup: function(xhr) { xhr.withCredentials = false; }
-      });
+      video.play().catch(function() {});
+    });
 
-      if (window._iframe_cloud_hls) {
-        try { window._iframe_cloud_hls.destroy(); } catch(e) {}
+    hls.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+      if (qualityMenuOpen) return;
+      var lvl = currentLevels.find(function(l) { return l.index === data.level; });
+      if (lvl) qualityBtn.text('\u2699 ' + lvl.label);
+    });
+
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        debugLog('error', 'playWithOwnHls: fatal error', { type: data.type, details: data.details });
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else {
+          closePlayer();
+        }
       }
-      window._iframe_cloud_hls = hls;
+    });
 
-      hls.loadSource(proxyUrl);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
-        debugLog('info', 'playWithOwnHls: manifest parsed', { levels: data.levels.length, audio: data.audioTracks.length });
-
-        var parsedLevels = data.levels.map(function(lev, i) {
-          var h = lev.height || lev.attrs?.RESOLUTION?.split('x')[1] || 0;
-          var label = h ? h + 'p' : 'Level ' + i;
-          return { index: i, label: label, height: h, bandwidth: lev.bitrate || 0 };
-        });
-
-        parsedLevels.sort(function(a, b) { return b.height - a.height; });
-
-        var currentLevelIdx = 0;
-        if (parsedLevels.length > 1) {
-          showQualityMenu(parsedLevels, function(selectedIdx) {
-            hls.nextLevel = selectedIdx;
-            debugLog('info', 'playWithOwnHls: quality switched via nextLevel', { level: selectedIdx });
-          });
-        }
-
-        if (audioTracks.length > 1) {
-          var atItems = audioTracks.map(function(at, i) {
-            return { title: at.name || ('Audio ' + (i + 1)), _idx: i };
-          });
-          if (subtitles && subtitles.length) {
-            subtitles.forEach(function(s) {
-              atItems.push({ title: 'Субтитры: ' + s.label, _subtitle: s });
-            });
-          }
-        }
-
-        video.play().catch(function() {});
+    function showQualityList() {
+      qualityMenuOpen = true;
+      var items = currentLevels.map(function(l) {
+        return {
+          title: l.label,
+          subtitle: l.bandwidth ? Math.round(l.bandwidth / 1000) + ' kbps' : '',
+          _level: l
+        };
       });
+      items.push({ title: 'Auto', subtitle: '', _level: { index: -1 } });
 
-      hls.on(Hls.Events.ERROR, function(event, data) {
-        if (data.fatal) {
-          debugLog('error', 'playWithOwnHls: fatal error', { type: data.type, details: data.details });
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
+      Lampa.Select.show({
+        title: PLUGIN_NAME + ' — \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e',
+        items: items,
+        onSelect: function(item) {
+          qualityMenuOpen = false;
+          var idx = item._level.index;
+          if (idx === -1) {
+            hls.nextLevel = -1;
+            qualityBtn.text('\u2699 Auto');
           } else {
-            hls.destroy();
-            showIframePlayer(proxyUrl, title);
+            hls.nextLevel = idx;
+            qualityBtn.text('\u2699 ' + item._level.label);
           }
+          debugLog('info', 'playWithOwnHls: quality switched via nextLevel', { level: idx });
+        },
+        onBack: function() {
+          qualityMenuOpen = false;
         }
       });
+    }
 
-      video.addEventListener('timeupdate', function() {
-        if (!movie || !window._iframe_cloud_current) return;
-        var cur = window._iframe_cloud_current;
-        if (cur.timeline) {
-          cur.timeline.time = Math.round(video.currentTime);
-          cur.timeline.duration = Math.round(video.duration);
+    qualityBtn.on('hover:enter click', showQualityList);
+
+    function closePlayer() {
+      try { hls.destroy(); } catch(e) {}
+      window._iframe_cloud_hls = null;
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch(e) {}
+      try { if (video.parentNode) video.parentNode.removeChild(video); } catch(e) {}
+      container.remove();
+      document.removeEventListener('keydown', keyHandler);
+      try { Lampa.Controller.toggle('content'); } catch(err) {}
+    }
+
+    closeBtn.on('hover:enter click', closePlayer);
+
+    var keyHandler = function(e) {
+      if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
+        closePlayer();
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    video.addEventListener('timeupdate', function() {
+      if (!movie || !window._iframe_cloud_current) return;
+      var cur = window._iframe_cloud_current;
+      if (cur.timeline) {
+        cur.timeline.time = Math.round(video.currentTime);
+        cur.timeline.duration = Math.round(video.duration || 0);
+        if (video.duration) {
           cur.timeline.percent = Math.min(100, Math.round((video.currentTime / video.duration) * 100));
           Lampa.Timeline.update(cur.timeline);
         }
-      });
-
-      var overlay = $('<div style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;"></div>');
-      var closeBtn = $('<div style="position:absolute;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;">\u2715</div>');
-      closeBtn.on('hover:enter click', function() {
-        hls.destroy();
-        window._iframe_cloud_hls = null;
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
-        if (video.parentNode) video.parentNode.removeChild(video);
-        overlay.remove();
-        try { Lampa.Controller.toggle('content'); } catch(e) {}
-      });
-
-      var keyHandler = function(e) {
-        if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
-          closeBtn.trigger('hover:enter');
-        }
-      };
-      document.addEventListener('keydown', keyHandler);
-
-      overlay.append(closeBtn);
-      $('body').append(overlay);
-
-      if (movie && (movie.id || movie.original_title || movie.title)) {
-        var hash = getTimelineHash(movie, label);
-        var timeline = Lampa.Timeline.view(hash);
-        window._iframe_cloud_current = { timeline: timeline, movie: movie, label: label };
-        addToHistory(movie);
       }
+    });
+
+    container.append(video).append(closeBtn).append(qualityBtn);
+    $('body').append(container);
+
+    if (movie && (movie.id || movie.original_title || movie.title)) {
+      var hash = getTimelineHash(movie, label);
+      var timeline = Lampa.Timeline.view(hash);
+      window._iframe_cloud_current = { timeline: timeline, movie: movie, label: label };
+      addToHistory(movie);
     }
 
-    fetchJson(WORKER_URL + '/?parse_m3u8=' + encodeURIComponent(hlsUrl)).then(function(data) {
-      var levels = data.levels || [];
-      var audioTracks = (audioNames || []).map(function(n) { return { name: n }; });
-      startPlayback(levels, audioTracks, subtitles || []);
-    }).catch(function(e) {
-      debugLog('warn', 'playWithOwnHls: m3u8 parse failed, playing directly', { error: e.message });
-      startPlayback([], (audioNames || []).map(function(n) { return { name: n }; }), subtitles || []);
-    });
-  }
-
-  function showQualityMenu(levels, onSelect) {
-    if (levels.length < 2) return;
-
-    var items = levels.map(function(l) {
-      return {
-        title: l.label,
-        subtitle: l.bandwidth ? Math.round(l.bandwidth / 1000) + ' kbps' : '',
-        _level: l
-      };
-    });
-
-    Lampa.Select.show({
-      title: PLUGIN_NAME + ' — Качество',
-      items: items,
-      onSelect: function(item) {
-        onSelect(item._level.index);
-      },
-      onBack: function() {
-        onSelect(0);
-      }
-    });
+    if (audioNames && audioNames.length) {
+      debugLog('info', 'playWithOwnHls: audio tracks', audioNames);
+    }
+    if (subtitles && subtitles.length) {
+      debugLog('info', 'playWithOwnHls: subtitles', subtitles.length);
+    }
   }
 
   /* ---- iframe.cloud source ---- */
@@ -565,21 +576,8 @@
           return;
         }
 
-        var items = players.map(function(p) {
-          return { title: p.name, _url: p.url };
-        });
-
-        Lampa.Select.show({
-          title: PLUGIN_NAME + ' — ' + title,
-          items: items,
-          onSelect: function(item) {
-            loadIframeCloudPlayer(item._url, title, movie);
-          },
-          onBack: function() {
-            Lampa.Loading.stop();
-            Lampa.Controller.toggle('content');
-          }
-        });
+        Lampa.Noty.show(PLUGIN_NAME + ': найдено ' + players.length + ' плееров, загрузка...');
+        loadIframeCloudPlayer(players[0].url, title, movie, players.slice(1));
       }).catch(function(e) {
         Lampa.Loading.stop();
         debugLog('error', 'iframe.cloud fetch error', { error: e.message });
@@ -590,7 +588,7 @@
     });
   }
 
-  function loadIframeCloudPlayer(playerUrl, title, movie) {
+  function loadIframeCloudPlayer(playerUrl, title, movie, remainingPlayers) {
     Lampa.Loading.start('MovieZone');
 
     var encodedUrl = encodeURIComponent(playerUrl);
@@ -599,7 +597,12 @@
 
       if (data.error) {
         debugLog('error', 'iframe.cloud embed error', data);
-        showIframePlayer(playerUrl, title);
+        if (remainingPlayers && remainingPlayers.length) {
+          Lampa.Noty.show(PLUGIN_NAME + ': ' + playerUrl.substring(0, 40) + '... ошибка, пробуем следующий...');
+          loadIframeCloudPlayer(remainingPlayers[0].url, title, movie, remainingPlayers.slice(1));
+        } else {
+          showIframePlayer(playerUrl, title);
+        }
         return;
       }
 
