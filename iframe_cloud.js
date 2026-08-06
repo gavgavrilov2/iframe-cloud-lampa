@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.79.1');
+  console.log('[MovieZone] Loading v5.80.0');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -400,23 +400,45 @@
       }
 
       Lampa.Loading.start('MovieZone');
-      fetchJson(WORKER_URL + '/?iframe_cloud_play=' + kpId).then(function(data) {
+
+      // Try automatic superdupercdn.com extraction first
+      fetchJson(WORKER_URL + '/?iframe_cloud_native=' + kpId).then(function(data) {
         Lampa.Loading.stop();
 
         if (data.error || !data.url) {
-          debugLog('warn', 'iframe.cloud native play failed, trying iframe fallback', data);
-          playIframeCloudIframe(kpId, title, movie);
+          debugLog('warn', 'iframe.cloud native failed, trying iframe_cloud_play', data);
+          tryIframeCloudPlayFallback(kpId, title, movie);
           return;
         }
 
+        debugLog('info', 'iframe.cloud native success', { url: data.url.substring(0, 80), source: data.source });
         playIframeCloudVideo(data, title, movie);
       }).catch(function(e) {
         Lampa.Loading.stop();
-        debugLog('warn', 'iframe.cloud play error, trying iframe fallback', { error: e.message });
-        playIframeCloudIframe(kpId, title, movie);
+        debugLog('warn', 'iframe.cloud native error', { error: e.message });
+        tryIframeCloudPlayFallback(kpId, title, movie);
       });
     }).catch(function(e) {
       Lampa.Noty.show(PLUGIN_NAME + ': ' + e.message);
+    });
+  }
+
+  function tryIframeCloudPlayFallback(kpId, title, movie) {
+    Lampa.Loading.start('MovieZone');
+    fetchJson(WORKER_URL + '/?iframe_cloud_play=' + kpId).then(function(data) {
+      Lampa.Loading.stop();
+
+      if (data.error || !data.url) {
+        debugLog('warn', 'iframe.cloud play failed, trying iframe fallback', data);
+        playIframeCloudIframe(kpId, title, movie);
+        return;
+      }
+
+      playIframeCloudVideo(data, title, movie);
+    }).catch(function(e) {
+      Lampa.Loading.stop();
+      debugLog('warn', 'iframe.cloud play error, trying iframe fallback', { error: e.message });
+      playIframeCloudIframe(kpId, title, movie);
     });
   }
 
@@ -1901,7 +1923,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.79.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
+      type: 'video', version: '5.80.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

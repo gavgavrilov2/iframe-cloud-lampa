@@ -35,6 +35,7 @@ export default {
     const iframeCloudEmbed = url.searchParams.get('iframe_cloud_embed');
     const parseM3u8 = url.searchParams.get('parse_m3u8');
     const iframeCloudPlay = url.searchParams.get('iframe_cloud_play');
+    const iframeCloudNative = url.searchParams.get('iframe_cloud_native');
     const iframeCloudPlayPlayer = url.searchParams.get('player');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
@@ -80,6 +81,10 @@ export default {
 
     if (iframeCloudPlay) {
       return await handleIframeCloudPlay(iframeCloudPlay, iframeCloudPlayPlayer, corsHeaders);
+    }
+
+    if (iframeCloudNative) {
+      return await handleIframeCloudSuperdupercdn(iframeCloudNative, corsHeaders);
     }
 
     if (iframeCloudEmbed) {
@@ -1376,6 +1381,139 @@ async function handleCollapsEmbed(embedUrl, corsHeaders) {
     });
   } catch(e) {
     return new Response(JSON.stringify({ names: [], error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/* ---- cdn.js URL transformation for superdupercdn.com ---- */
+
+var CDN_SUBST_FROM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+var CDN_SUBST_TO = "DlChEXitLONYRkFjAsnBbymWzSHMqKPgQZpvwerofJTVdIuUcxaG";
+
+function cdnCharSubst(ch) {
+  var idx = CDN_SUBST_FROM.indexOf(ch);
+  return idx > -1 ? CDN_SUBST_TO[idx] : ch;
+}
+
+function transformInterkhUrl(originalUrl, unixTime) {
+  try {
+    var o = new URL(originalUrl);
+    if (o.pathname.indexOf('/x-en-x/') !== -1) return originalUrl;
+    var n = Math.round(unixTime / 3600);
+    var input = n + '/' + o.pathname + (o.search || '');
+    var encoded = btoa(input);
+    var substituted = encoded.split('').map(cdnCharSubst).join('');
+    return o.origin + '/' + substituted;
+  } catch(e) {
+    return null;
+  }
+}
+
+/* ---- iframe.cloud → superdupercdn.com: automatic extraction ---- */
+
+async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
+  try {
+    var cloudResp = await fetch('https://iframe.cloud/iframe/' + kpId, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Accept': 'text/html'
+      }
+    });
+    if (!cloudResp.ok) {
+      return new Response(JSON.stringify({ error: 'iframe.cloud returned ' + cloudResp.status }), {
+        status: cloudResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    var cloudHtml = await cloudResp.text();
+
+    var players = [];
+    var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
+    var m;
+    while ((m = re.exec(cloudHtml)) !== null) {
+      players.push({ name: m[2].trim(), url: m[1] });
+    }
+    if (!players.length) {
+      return new Response(JSON.stringify({ error: 'No players found' }), {
+        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    var ortifiedIdx = -1;
+    for (var i = 0; i < players.length; i++) {
+      if (players[i].url.indexOf('ortified.ws') !== -1) { ortifiedIdx = i; break; }
+    }
+    if (ortifiedIdx > 0) {
+      var tmp = players[0]; players[0] = players[ortifiedIdx]; players[ortifiedIdx] = tmp;
+    }
+
+    for (var pi = 0; pi < players.length; pi++) {
+      var playerUrl = players[pi].url;
+      if (playerUrl.indexOf('veoveo') !== -1 || playerUrl.indexOf('tazaromikaz') !== -1) continue;
+      try {
+        var embedHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          'Accept': 'text/html',
+          'Origin': 'https://iframe.cloud',
+          'Referer': 'https://iframe.cloud/'
+        };
+        var embedResp = await fetch(playerUrl, { headers: embedHeaders });
+        if (!embedResp.ok) continue;
+        var embedHtml = await embedResp.text();
+
+        var playerData = parseMakePlayer(embedHtml);
+        if (!playerData || !playerData.hls) continue;
+
+        var hlsUrl = playerData.hls;
+        var audioNames = [];
+        if (playerData.audio && playerData.audio.names) {
+          audioNames = playerData.audio.names.filter(function(n) { return n && n !== 'delete'; });
+        }
+        var subtitles = [];
+        if (playerData.cc && Array.isArray(playerData.cc)) {
+          subtitles = playerData.cc.map(function(c) { return { label: c.name || '', url: c.url || '' }; }).filter(function(s) { return s.url; });
+        }
+
+        var unixTimeMatch = embedHtml.match(/unixTime\s*=\s*(\d+)/);
+        var unixTime = unixTimeMatch ? parseInt(unixTimeMatch[1]) : Math.round(Date.now() / 1000);
+
+        var transformedUrl = transformInterkhUrl(hlsUrl, unixTime);
+        var tryUrls = transformedUrl ? [transformedUrl, hlsUrl] : [hlsUrl];
+
+        for (var ui = 0; ui < tryUrls.length; ui++) {
+          try {
+            var fetchResp = await fetch(tryUrls[ui], {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Referer': 'https://iframe.cloud/'
+              },
+              redirect: 'follow'
+            });
+            if (!fetchResp.ok) continue;
+
+            var body = await fetchResp.text();
+            if (body.indexOf('#EXTM3U') !== -1 || body.indexOf('#EXT-X-') !== -1) {
+              var finalUrl = fetchResp.url || tryUrls[ui];
+              return new Response(JSON.stringify({
+                url: finalUrl,
+                audioNames: audioNames,
+                subtitles: subtitles,
+                source: players[pi].name
+              }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+            }
+          } catch(fetchErr) { continue; }
+        }
+      } catch(e) { continue; }
+    }
+
+    return new Response(JSON.stringify({ error: 'Could not extract video URL' }), {
+      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
