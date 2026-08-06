@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.79.0');
+  console.log('[MovieZone] Loading v5.79.1');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -404,104 +404,172 @@
         Lampa.Loading.stop();
 
         if (data.error || !data.url) {
-          debugLog('error', 'iframe.cloud play error', data);
-          Lampa.Noty.show(PLUGIN_NAME + ': ' + (data.error || ' видео не найдено'));
+          debugLog('warn', 'iframe.cloud native play failed, trying iframe fallback', data);
+          playIframeCloudIframe(kpId, title, movie);
           return;
         }
 
         playIframeCloudVideo(data, title, movie);
       }).catch(function(e) {
         Lampa.Loading.stop();
-        debugLog('error', 'iframe.cloud play fetch error', { error: e.message });
-        Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки iframe.cloud');
+        debugLog('warn', 'iframe.cloud play error, trying iframe fallback', { error: e.message });
+        playIframeCloudIframe(kpId, title, movie);
       });
     }).catch(function(e) {
       Lampa.Noty.show(PLUGIN_NAME + ': ' + e.message);
     });
   }
 
+  function playIframeCloudIframe(kpId, title, movie) {
+    fetchJson(WORKER_URL + '/?iframe_cloud_kp=' + kpId).then(function(data) {
+      var players = data.players || [];
+      if (!players.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': источники не найдены');
+        return;
+      }
+
+      var url = 'https://iframe.cloud/iframe/' + kpId;
+      addToHistory(movie);
+      showIframePlayer(url, title);
+    }).catch(function(e) {
+      Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки');
+    });
+  }
+
   function playIframeCloudVideo(data, title, movie) {
     var hlsUrl = data.url;
-    var quality = data.quality || {};
     var audioNames = data.audioNames || [];
     var subtitles = data.subtitles || [];
 
-    debugLog('info', 'playIframeCloudVideo: building quality object', {
+    debugLog('info', 'playIframeCloudVideo: fetching m3u8 for quality parsing', {
       url: hlsUrl.substring(0, 80) + '...',
-      qualityKeys: Object.keys(quality),
       audioNames: audioNames
     });
 
-    var play = {
-      url: proxy(hlsUrl),
-      type: 'm3u8',
-      title: PLUGIN_NAME + ' — ' + title,
-      subtitles: subtitles.length ? subtitles : [],
-      translate: audioNames.length ? {
-        tracks: audioNames.map(function(t) { return { language: t.name || t, label: '', extra: {} }; })
-      } : undefined
-    };
+    var proxiedUrl = proxy(hlsUrl);
 
-    if (Object.keys(quality).length > 0) {
-      play.quality = {};
-      var qKeys = Object.keys(quality);
-      for (var i = 0; i < qKeys.length; i++) {
-        play.quality[qKeys[i]] = proxy(quality[qKeys[i]]);
+    fetchText(proxiedUrl).then(function(m3u8Text) {
+      var levels = parseM3u8QualityLevels(m3u8Text, hlsUrl);
+
+      var play = {
+        url: proxiedUrl,
+        type: 'm3u8',
+        title: PLUGIN_NAME + ' — ' + title,
+        subtitles: subtitles.length ? subtitles : [],
+        translate: audioNames.length ? {
+          tracks: audioNames.map(function(t) { return { language: t.name || t, label: '', extra: {} }; })
+        } : undefined
+      };
+
+      if (levels.length > 1) {
+        play.quality = {};
+        for (var i = 0; i < levels.length; i++) {
+          var lev = levels[i];
+          var label = lev.height ? lev.height + 'p' : ('Level ' + i);
+          play.quality[label] = proxy(lev.url);
+        }
+      }
+
+      var hash = getTimelineHash(movie, 'iframe.cloud');
+      var timeline = Lampa.Timeline.view(hash);
+      play.timeline = timeline;
+
+      var beholdHash = getBeholdHash(movie, 'iframe.cloud');
+      markViewed(beholdHash);
+
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: 'iframe.cloud'
+      };
+
+      addToHistory(movie);
+
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+      setupPlayerBack();
+
+      if (timeline) {
+        setTimeout(function() {
+          var el = document.querySelector('video');
+          if (!el) return;
+
+          var lastSave = 0;
+          var savePos = function() {
+            var now = Date.now();
+            if (now - lastSave < 3000) return;
+            if (!el.duration || el.duration < 10) return;
+            lastSave = now;
+            timeline.time = Math.round(el.currentTime);
+            timeline.duration = Math.round(el.duration);
+            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+            Lampa.Timeline.update(timeline);
+          };
+
+          el.addEventListener('timeupdate', savePos);
+          el.addEventListener('pause', savePos);
+          el.addEventListener('ended', savePos);
+
+          var doRestore = function() {
+            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+              el.currentTime = timeline.time;
+              Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+            }
+          };
+
+          if (el.readyState >= 1) doRestore();
+          else el.addEventListener('loadedmetadata', doRestore);
+        }, 1500);
+      }
+    }).catch(function(e) {
+      debugLog('error', 'playIframeCloudVideo: m3u8 fetch failed, playing without quality', { error: e.message });
+
+      var play = {
+        url: proxiedUrl,
+        type: 'm3u8',
+        title: PLUGIN_NAME + ' — ' + title,
+        subtitles: subtitles.length ? subtitles : [],
+        translate: audioNames.length ? {
+          tracks: audioNames.map(function(t) { return { language: t.name || t, label: '', extra: {} }; })
+        } : undefined
+      };
+
+      var hash = getTimelineHash(movie, 'iframe.cloud');
+      var timeline = Lampa.Timeline.view(hash);
+      play.timeline = timeline;
+      addToHistory(movie);
+
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+      setupPlayerBack();
+    });
+  }
+
+  function parseM3u8QualityLevels(text, masterUrl) {
+    if (!text) return [];
+    var lines = text.split('\n');
+    var levels = [];
+    var base = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
+        var bwMatch = line.match(/BANDWIDTH=(\d+)/);
+        var resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+        var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+        if (nextLine && nextLine.indexOf('#') !== 0) {
+          var url = nextLine;
+          if (url.indexOf('http') !== 0) url = base + url;
+          levels.push({
+            bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+            height: resMatch ? parseInt(resMatch[2]) : 0,
+            url: url
+          });
+        }
       }
     }
-
-    var hash = getTimelineHash(movie, 'iframe.cloud');
-    var timeline = Lampa.Timeline.view(hash);
-    play.timeline = timeline;
-
-    var beholdHash = getBeholdHash(movie, 'iframe.cloud');
-    markViewed(beholdHash);
-
-    window._iframe_cloud_current = {
-      timeline: timeline,
-      beholdHash: beholdHash,
-      movie: movie,
-      label: 'iframe.cloud'
-    };
-
-    addToHistory(movie);
-
-    Lampa.Player.play(play);
-    Lampa.Player.playlist([play]);
-    setupPlayerBack();
-
-    if (timeline) {
-      setTimeout(function() {
-        var el = document.querySelector('video');
-        if (!el) return;
-
-        var lastSave = 0;
-        var savePos = function() {
-          var now = Date.now();
-          if (now - lastSave < 3000) return;
-          if (!el.duration || el.duration < 10) return;
-          lastSave = now;
-          timeline.time = Math.round(el.currentTime);
-          timeline.duration = Math.round(el.duration);
-          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-          Lampa.Timeline.update(timeline);
-        };
-
-        el.addEventListener('timeupdate', savePos);
-        el.addEventListener('pause', savePos);
-        el.addEventListener('ended', savePos);
-
-        var doRestore = function() {
-          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-            el.currentTime = timeline.time;
-            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-          }
-        };
-
-        if (el.readyState >= 1) doRestore();
-        else el.addEventListener('loadedmetadata', doRestore);
-      }, 1500);
-    }
+    levels.sort(function(a, b) { return b.height - a.height; });
+    return levels;
   }
 
   /* ---- ortified embed parsing ---- */

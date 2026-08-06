@@ -1385,6 +1385,7 @@ async function handleCollapsEmbed(embedUrl, corsHeaders) {
 async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
   try {
     // Step 1: fetch iframe.cloud to get player URLs if playerUrl not provided
+    var players = [];
     if (!playerUrl) {
       var cloudResp = await fetch('https://iframe.cloud/iframe/' + kpId, {
         headers: {
@@ -1400,7 +1401,6 @@ async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
       var cloudHtml = await cloudResp.text();
       var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
       var m;
-      var players = [];
       while ((m = re.exec(cloudHtml)) !== null) {
         players.push({ name: m[2].trim(), url: m[1] });
       }
@@ -1409,72 +1409,61 @@ async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
           status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-      playerUrl = players[0].url;
+    } else {
+      players = [{ url: playerUrl }];
     }
 
-    // Step 2: fetch player embed and parse makePlayer()
-    var isOrtified = playerUrl.indexOf('ortified.ws') !== -1;
-    var embedHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-      'Accept': 'text/html'
-    };
-    if (isOrtified) {
-      embedHeaders['Origin'] = 'https://iframe.cloud';
-      embedHeaders['Referer'] = 'https://iframe.cloud/';
-    }
-    var embedResp = await fetch(playerUrl, { headers: embedHeaders });
-    if (!embedResp.ok) {
-      return new Response(JSON.stringify({ error: 'Player returned ' + embedResp.status }), {
-        status: embedResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    var embedHtml = await embedResp.text();
-    var playerData = parseMakePlayer(embedHtml);
+    // Step 2: try each player until one works
+    var lastError = null;
+    for (var pi = 0; pi < players.length; pi++) {
+      var currentPlayerUrl = players[pi].url;
+      try {
+        var embedHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          'Accept': 'text/html',
+          'Origin': 'https://iframe.cloud',
+          'Referer': 'https://iframe.cloud/'
+        };
+        var embedResp = await fetch(currentPlayerUrl, { headers: embedHeaders });
+        if (!embedResp.ok) {
+          lastError = 'Player ' + (pi + 1) + ' returned ' + embedResp.status;
+          continue;
+        }
+        var embedHtml = await embedResp.text();
+        var playerData = parseMakePlayer(embedHtml);
 
-    if (!playerData || !playerData.hls) {
-      return new Response(JSON.stringify({ error: 'No HLS URL found in player' }), {
-        status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+        if (!playerData || !playerData.hls) {
+          lastError = 'Player ' + (pi + 1) + ': no HLS URL found';
+          continue;
+        }
 
-    // Step 3: fetch master m3u8 and parse quality levels
-    var hlsUrl = playerData.hls;
-    var m3u8Resp = await fetch(hlsUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Referer': new URL(hlsUrl).origin + '/'
+        var hlsUrl = playerData.hls;
+        var audioNames = [];
+        if (playerData.audio && playerData.audio.names) {
+          audioNames = playerData.audio.names.filter(function(n) { return n && n !== 'delete'; });
+        }
+
+        var subtitles = [];
+        if (playerData.cc && Array.isArray(playerData.cc)) {
+          subtitles = playerData.cc.map(function(c) { return { label: c.name || '', url: c.url || '' }; }).filter(function(s) { return s.url; });
+        }
+
+        // Return just the URL — plugin will parse m3u8 client-side via ?proxy=
+        return new Response(JSON.stringify({
+          url: hlsUrl,
+          audioNames: audioNames,
+          subtitles: subtitles
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      } catch(e) {
+        lastError = 'Player ' + (pi + 1) + ': ' + e.message;
+        continue;
       }
-    });
-
-    var quality = {};
-    if (m3u8Resp.ok) {
-      var m3u8Text = await m3u8Resp.text();
-      var levels = parseM3u8Levels(m3u8Text, hlsUrl);
-      for (var li = 0; li < levels.length; li++) {
-        var lev = levels[li];
-        var label = lev.height ? lev.height + 'p' : ('Level ' + li);
-        quality[label] = lev.url;
-      }
     }
 
-    var audioNames = [];
-    if (playerData.audio && playerData.audio.names) {
-      audioNames = playerData.audio.names.filter(function(n) { return n && n !== 'delete'; });
-    }
-
-    var subtitles = [];
-    if (playerData.cc && Array.isArray(playerData.cc)) {
-      subtitles = playerData.cc.map(function(c) { return { label: c.name || '', url: c.url || '' }; }).filter(function(s) { return s.url; });
-    }
-
-    return new Response(JSON.stringify({
-      url: hlsUrl,
-      quality: quality,
-      audioNames: audioNames,
-      subtitles: subtitles
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ error: lastError || 'All players failed' }), {
+      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch(e) {
     return new Response(JSON.stringify({ error: e.message }), {
@@ -1484,10 +1473,24 @@ async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
 }
 
 function parseMakePlayer(html) {
-  var find = html.replace(/\n/g, '').match(/makePlayer\(\{([\s\S]*?)\}\);?/);
-  if (!find) return null;
+  // Find the last makePlayer({ call
+  var idx = html.lastIndexOf('makePlayer({');
+  if (idx === -1) idx = html.lastIndexOf('makePlayer({');
+  if (idx === -1) return null;
 
-  var jsStr = find[1];
+  var start = html.indexOf('{', idx);
+  if (start === -1) return null;
+
+  // Find matching closing brace using bracket counting
+  var depth = 0;
+  var end = -1;
+  for (var i = start; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    else if (html[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) return null;
+
+  var jsStr = html.substring(start + 1, end);
 
   // Quote unquoted keys: word: → "word":
   jsStr = jsStr.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
@@ -1499,7 +1502,22 @@ function parseMakePlayer(html) {
   jsStr = jsStr.replace(/'/g, '"');
 
   try {
-    return JSON.parse(jsStr);
+    var obj = JSON.parse('{' + jsStr + '}');
+    // Flatten source.hls into top-level hls if needed
+    if (!obj.hls && obj.source && obj.source.hls) {
+      obj.hls = obj.source.hls;
+    }
+    if (!obj.dash && obj.source && obj.source.dash) {
+      obj.dash = obj.source.dash;
+    }
+    if (!obj.dasha && obj.source && obj.source.dasha) {
+      obj.dasha = obj.source.dasha;
+    }
+    // Flatten source.audio into top-level audio if needed
+    if ((!obj.audio || !obj.audio.names) && obj.source && obj.source.audio) {
+      obj.audio = obj.source.audio;
+    }
+    return obj;
   } catch(e) {
     return null;
   }

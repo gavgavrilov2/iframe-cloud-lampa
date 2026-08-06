@@ -1,6 +1,6 @@
 {
   "type": "video",
-  "version": "5.79.0",
+  "version": "5.79.1",
   "name": "MovieZone",
   "description": "VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching",
   "component": "iframe_cloud",
