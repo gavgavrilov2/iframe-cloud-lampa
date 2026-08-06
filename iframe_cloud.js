@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.80.0');
+  console.log('[MovieZone] Loading v5.80.1');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -450,12 +450,103 @@
         return;
       }
 
-      var url = 'https://iframe.cloud/iframe/' + kpId;
-      addToHistory(movie);
-      showIframePlayer(url, title);
+      showIframeCloudDialog(kpId, title, movie);
     }).catch(function(e) {
       Lampa.Noty.show(PLUGIN_NAME + ': ошибка загрузки');
     });
+  }
+
+  function showPasteUrlDialog(movie) {
+    var title = movie.title || movie.name || '';
+    var dialog = $('<div class="iframe-cloud-dialog" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;"></div>');
+    var box = $('<div style="background:#1a1a2e;border-radius:12px;padding:24px 28px;max-width:500px;width:90%;color:#fff;font-family:Arial,sans-serif;"></div>');
+
+    var heading = $('<div style="font-size:18px;font-weight:bold;margin-bottom:6px;"></div>').text(title);
+    var subtext = $('<div style="font-size:13px;color:#aaa;margin-bottom:20px;">\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 m3u8 URL \u0438\u0437 m3u8 Sniffer</div>');
+
+    var urlInput = $('<input type="text" placeholder="https://z.superdupercdn.com/..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #444;background:#111;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:10px;">');
+    var btnPlay = $('<div style="background:#16a34a;color:#fff;padding:12px 16px;border-radius:8px;cursor:pointer;text-align:center;font-size:15px;">\u25B6 \u0412\u043E\u0441\u043F\u0440\u043E\u0438\u0437\u0432\u0435\u0441\u0442\u0438</div>');
+    var btnPlayHint = $('<div style="font-size:11px;color:#666;margin-top:6px;text-align:center;">\u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u043B\u0435\u0435\u0440 \u0441 \u0432\u044B\u0431\u043E\u0440\u043E\u043C \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430</div>');
+
+    var closeBtn = $('<div style="text-align:center;margin-top:14px;font-size:13px;color:#666;cursor:pointer;">\u2715 \u0417\u0430\u043A\u0440\u044B\u0442\u044C</div>');
+
+    function close() { dialog.remove(); }
+
+    btnPlay.on('hover:enter click', function() {
+      var url = $.trim(urlInput.val());
+      if (!url) {
+        Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0441\u0442\u0430\u0432\u044C\u0442\u0435 URL');
+        return;
+      }
+      close();
+      addToHistory(movie);
+      debugLog('info', 'manual URL input', { url: url.substring(0, 80) });
+      playIframeCloudVideo({ url: url, audioNames: [], subtitles: [] }, title, movie);
+    });
+
+    urlInput.on('keydown', function(e) {
+      if (e.keyCode === 13) { btnPlay.trigger('click'); }
+    });
+
+    closeBtn.on('hover:enter click', close);
+
+    box.append(heading).append(subtext).append(urlInput).append(btnPlay).append(btnPlayHint).append(closeBtn);
+    dialog.append(box);
+    $('body').append(dialog);
+
+    setTimeout(function() { urlInput.focus(); }, 100);
+  }
+
+  function showIframeCloudDialog(kpId, title, movie) {
+    var dialog = $('<div class="iframe-cloud-dialog" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;"></div>');
+    var box = $('<div style="background:#1a1a2e;border-radius:12px;padding:24px 28px;max-width:500px;width:90%;color:#fff;font-family:Arial,sans-serif;"></div>');
+
+    var heading = $('<div style="font-size:18px;font-weight:bold;margin-bottom:6px;"></div>').text(title);
+    var subtext = $('<div style="font-size:13px;color:#aaa;margin-bottom:20px;">iframe.cloud — ' + PLUGIN_NAME + '</div>');
+
+    var btnIframe = $('<div style="background:#2563eb;color:#fff;padding:12px 16px;border-radius:8px;cursor:pointer;text-align:center;margin-bottom:12px;font-size:15px;">\u25B6 \u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0432 \u043F\u043B\u0435\u0435\u0440\u0435</div>');
+    var btnIframeHint = $('<div style="font-size:11px;color:#888;margin-bottom:16px;text-align:center;">\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439 \u043F\u043B\u0435\u0435\u0440 \u0441 \u0432\u044B\u0431\u043E\u0440\u043E\u043C \u0430\u0443\u0434\u0438\u043E</div>');
+
+    var urlLabel = $('<div style="font-size:13px;color:#ccc;margin-bottom:6px;">\u0418\u043B\u0438 \u0432\u0441\u0442\u0430\u0432\u044C\u0442\u0435 m3u8 URL \u0438\u0437 m3u8 Sniffer:</div>');
+    var urlInput = $('<input type="text" placeholder="https://z.superdupercdn.com/..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #444;background:#111;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:10px;">');
+    var btnPlay = $('<div style="background:#16a34a;color:#fff;padding:12px 16px;border-radius:8px;cursor:pointer;text-align:center;font-size:15px;">\u25B6 \u0412\u043E\u0441\u043F\u0440\u043E\u0438\u0437\u0432\u0435\u0441\u0442\u0438</div>');
+    var btnPlayHint = $('<div style="font-size:11px;color:#666;margin-top:6px;text-align:center;">\u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u043B\u0435\u0435\u0440 \u0441 \u0432\u044B\u0431\u043E\u0440\u043E\u043C \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430</div>');
+
+    var closeBtn = $('<div style="text-align:center;margin-top:14px;font-size:13px;color:#666;cursor:pointer;">\u2715 \u0417\u0430\u043A\u0440\u044B\u0442\u044C</div>');
+
+    function close() { dialog.remove(); }
+
+    btnIframe.on('hover:enter click', function() {
+      close();
+      addToHistory(movie);
+      showIframePlayer('https://iframe.cloud/iframe/' + kpId, title);
+    });
+
+    btnPlay.on('hover:enter click', function() {
+      var url = $.trim(urlInput.val());
+      if (!url) {
+        Lampa.Noty.show(PLUGIN_NAME + ': \u0432\u0441\u0442\u0430\u0432\u044C\u0442\u0435 URL');
+        return;
+      }
+      close();
+      addToHistory(movie);
+      debugLog('info', 'manual URL input', { url: url.substring(0, 80) });
+      playIframeCloudVideo({ url: url, audioNames: [], subtitles: [] }, title, movie);
+    });
+
+    urlInput.on('keydown', function(e) {
+      if (e.keyCode === 13) { btnPlay.trigger('click'); }
+    });
+
+    closeBtn.on('hover:enter click', close);
+
+    box.append(heading).append(subtext).append(btnIframe).append(btnIframeHint);
+    box.append(urlLabel).append(urlInput).append(btnPlay).append(btnPlayHint);
+    box.append(closeBtn);
+    dialog.append(box);
+    $('body').append(dialog);
+
+    setTimeout(function() { urlInput.focus(); }, 100);
   }
 
   function playIframeCloudVideo(data, title, movie) {
@@ -1820,6 +1911,12 @@
             subtitle: 'Collaps/Ortified — мульти-озвучка',
             icon: '🌐',
             _source: 'iframecloud'
+          },
+          {
+            title: 'Paste m3u8 URL',
+            subtitle: 'Вставить URL из m3u8 Sniffer',
+            icon: '📋',
+            _source: 'pasteurl'
           }
         ];
 
@@ -1839,6 +1936,8 @@
               searchAndPlayVk(movie);
             } else if (source === 'iframecloud') {
               playIframeCloudSource(movie);
+            } else if (source === 'pasteurl') {
+              showPasteUrlDialog(movie);
             }
           },
           onBack: function() {
@@ -1923,7 +2022,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.80.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
+      type: 'video', version: '5.80.1', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };

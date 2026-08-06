@@ -36,6 +36,7 @@ export default {
     const parseM3u8 = url.searchParams.get('parse_m3u8');
     const iframeCloudPlay = url.searchParams.get('iframe_cloud_play');
     const iframeCloudNative = url.searchParams.get('iframe_cloud_native');
+    const nativeDebug = url.searchParams.has('debug');
     const iframeCloudPlayPlayer = url.searchParams.get('player');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
@@ -84,7 +85,7 @@ export default {
     }
 
     if (iframeCloudNative) {
-      return await handleIframeCloudSuperdupercdn(iframeCloudNative, corsHeaders);
+      return await handleIframeCloudSuperdupercdn(iframeCloudNative, corsHeaders, nativeDebug);
     }
 
     if (iframeCloudEmbed) {
@@ -1412,7 +1413,8 @@ function transformInterkhUrl(originalUrl, unixTime) {
 
 /* ---- iframe.cloud → superdupercdn.com: automatic extraction ---- */
 
-async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
+async function handleIframeCloudSuperdupercdn(kpId, corsHeaders, debug) {
+  var log = [];
   try {
     var cloudResp = await fetch('https://iframe.cloud/iframe/' + kpId, {
       headers: {
@@ -1426,6 +1428,7 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
       });
     }
     var cloudHtml = await cloudResp.text();
+    log.push('cloud_html_len=' + cloudHtml.length);
 
     var players = [];
     var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
@@ -1433,8 +1436,9 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
     while ((m = re.exec(cloudHtml)) !== null) {
       players.push({ name: m[2].trim(), url: m[1] });
     }
+    log.push('players=' + JSON.stringify(players.map(function(p) { return { name: p.name, url: p.url.substring(0, 80) }; })));
     if (!players.length) {
-      return new Response(JSON.stringify({ error: 'No players found' }), {
+      return new Response(JSON.stringify({ error: 'No players found', debug: log }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
@@ -1443,13 +1447,15 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
     for (var i = 0; i < players.length; i++) {
       if (players[i].url.indexOf('ortified.ws') !== -1) { ortifiedIdx = i; break; }
     }
+    log.push('ortified_idx=' + ortifiedIdx);
     if (ortifiedIdx > 0) {
       var tmp = players[0]; players[0] = players[ortifiedIdx]; players[ortifiedIdx] = tmp;
     }
 
     for (var pi = 0; pi < players.length; pi++) {
       var playerUrl = players[pi].url;
-      if (playerUrl.indexOf('veoveo') !== -1 || playerUrl.indexOf('tazaromikaz') !== -1) continue;
+      if (playerUrl.indexOf('veoveo') !== -1 || playerUrl.indexOf('tazaromikaz') !== -1) { log.push('skip_' + pi + '=' + players[pi].name); continue; }
+      log.push('try_player_' + pi + '=' + playerUrl.substring(0, 80));
       try {
         var embedHeaders = {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -1458,10 +1464,13 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
           'Referer': 'https://iframe.cloud/'
         };
         var embedResp = await fetch(playerUrl, { headers: embedHeaders });
+        log.push('embed_status_' + pi + '=' + embedResp.status);
         if (!embedResp.ok) continue;
         var embedHtml = await embedResp.text();
+        log.push('embed_html_len_' + pi + '=' + embedHtml.length);
 
         var playerData = parseMakePlayer(embedHtml);
+        log.push('parsed_' + pi + '=' + JSON.stringify(playerData ? { hls: (playerData.hls || '').substring(0, 80), audio: playerData.audio ? playerData.audio.names : null } : null));
         if (!playerData || !playerData.hls) continue;
 
         var hlsUrl = playerData.hls;
@@ -1476,11 +1485,14 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
 
         var unixTimeMatch = embedHtml.match(/unixTime\s*=\s*(\d+)/);
         var unixTime = unixTimeMatch ? parseInt(unixTimeMatch[1]) : Math.round(Date.now() / 1000);
+        log.push('unixTime=' + unixTime + ' hlsUrl=' + hlsUrl.substring(0, 100));
 
         var transformedUrl = transformInterkhUrl(hlsUrl, unixTime);
+        log.push('transformed=' + (transformedUrl ? transformedUrl.substring(0, 120) : 'null'));
         var tryUrls = transformedUrl ? [transformedUrl, hlsUrl] : [hlsUrl];
 
         for (var ui = 0; ui < tryUrls.length; ui++) {
+          log.push('try_url_' + pi + '_' + ui + '=' + tryUrls[ui].substring(0, 120));
           try {
             var fetchResp = await fetch(tryUrls[ui], {
               headers: {
@@ -1490,30 +1502,29 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders) {
               },
               redirect: 'follow'
             });
+            log.push('fetch_status_' + pi + '_' + ui + '=' + fetchResp.status + ' url=' + (fetchResp.url || '').substring(0, 120));
             if (!fetchResp.ok) continue;
 
             var body = await fetchResp.text();
+            log.push('body_len_' + pi + '_' + ui + '=' + body.length + ' has_m3u8=' + (body.indexOf('#EXTM3U') !== -1 || body.indexOf('#EXT-X-') !== -1));
             if (body.indexOf('#EXTM3U') !== -1 || body.indexOf('#EXT-X-') !== -1) {
               var finalUrl = fetchResp.url || tryUrls[ui];
-              return new Response(JSON.stringify({
-                url: finalUrl,
-                audioNames: audioNames,
-                subtitles: subtitles,
-                source: players[pi].name
-              }), {
+              var result = { url: finalUrl, audioNames: audioNames, subtitles: subtitles, source: players[pi].name };
+              if (debug) result.debug = log;
+              return new Response(JSON.stringify(result), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
               });
             }
-          } catch(fetchErr) { continue; }
+          } catch(fetchErr) { log.push('fetch_err_' + pi + '_' + ui + '=' + fetchErr.message); continue; }
         }
-      } catch(e) { continue; }
+      } catch(e) { log.push('player_err_' + pi + '=' + e.message); continue; }
     }
 
-    return new Response(JSON.stringify({ error: 'Could not extract video URL' }), {
+    return new Response(JSON.stringify({ error: 'Could not extract video URL', debug: log }), {
       status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch(e) {
-    return new Response(JSON.stringify({ error: e.message }), {
+    return new Response(JSON.stringify({ error: e.message, debug: log }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
