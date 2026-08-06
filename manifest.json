@@ -1,8 +1,8 @@
 {
   "type": "video",
-  "version": "5.78.0",
+  "version": "5.79.0",
   "name": "MovieZone",
-  "description": "iframe.cloud source with own hls.js, nextLevel quality switching",
+  "description": "VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching",
   "component": "iframe_cloud",
   "icon": "assets/pixel.png"
 }

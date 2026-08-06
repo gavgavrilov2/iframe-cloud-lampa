@@ -34,6 +34,8 @@ export default {
     const iframeCloudKp = url.searchParams.get('iframe_cloud_kp');
     const iframeCloudEmbed = url.searchParams.get('iframe_cloud_embed');
     const parseM3u8 = url.searchParams.get('parse_m3u8');
+    const iframeCloudPlay = url.searchParams.get('iframe_cloud_play');
+    const iframeCloudPlayPlayer = url.searchParams.get('player');
 
     var pathMatch = url.pathname.match(/^\/kinogo\/(.+?)\/master\.m3u8$/);
     if (pathMatch) {
@@ -74,6 +76,10 @@ export default {
 
     if (iframeCloudKp) {
       return await handleIframeCloudKp(iframeCloudKp, corsHeaders);
+    }
+
+    if (iframeCloudPlay) {
+      return await handleIframeCloudPlay(iframeCloudPlay, iframeCloudPlayPlayer, corsHeaders);
     }
 
     if (iframeCloudEmbed) {
@@ -1375,6 +1381,108 @@ async function handleCollapsEmbed(embedUrl, corsHeaders) {
   }
 }
 
+/* ---- iframe.cloud combined: fetch player + parse makePlayer + parse m3u8 in one call ---- */
+async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
+  try {
+    // Step 1: fetch iframe.cloud to get player URLs if playerUrl not provided
+    if (!playerUrl) {
+      var cloudResp = await fetch('https://iframe.cloud/iframe/' + kpId, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          'Accept': 'text/html'
+        }
+      });
+      if (!cloudResp.ok) {
+        return new Response(JSON.stringify({ error: 'iframe.cloud returned ' + cloudResp.status }), {
+          status: cloudResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      var cloudHtml = await cloudResp.text();
+      var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
+      var m;
+      var players = [];
+      while ((m = re.exec(cloudHtml)) !== null) {
+        players.push({ name: m[2].trim(), url: m[1] });
+      }
+      if (!players.length) {
+        return new Response(JSON.stringify({ error: 'No players found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      playerUrl = players[0].url;
+    }
+
+    // Step 2: fetch player embed and parse makePlayer()
+    var isOrtified = playerUrl.indexOf('ortified.ws') !== -1;
+    var embedHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      'Accept': 'text/html'
+    };
+    if (isOrtified) {
+      embedHeaders['Origin'] = 'https://iframe.cloud';
+      embedHeaders['Referer'] = 'https://iframe.cloud/';
+    }
+    var embedResp = await fetch(playerUrl, { headers: embedHeaders });
+    if (!embedResp.ok) {
+      return new Response(JSON.stringify({ error: 'Player returned ' + embedResp.status }), {
+        status: embedResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    var embedHtml = await embedResp.text();
+    var playerData = parseMakePlayer(embedHtml);
+
+    if (!playerData || !playerData.hls) {
+      return new Response(JSON.stringify({ error: 'No HLS URL found in player' }), {
+        status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Step 3: fetch master m3u8 and parse quality levels
+    var hlsUrl = playerData.hls;
+    var m3u8Resp = await fetch(hlsUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Referer': new URL(hlsUrl).origin + '/'
+      }
+    });
+
+    var quality = {};
+    if (m3u8Resp.ok) {
+      var m3u8Text = await m3u8Resp.text();
+      var levels = parseM3u8Levels(m3u8Text, hlsUrl);
+      for (var li = 0; li < levels.length; li++) {
+        var lev = levels[li];
+        var label = lev.height ? lev.height + 'p' : ('Level ' + li);
+        quality[label] = lev.url;
+      }
+    }
+
+    var audioNames = [];
+    if (playerData.audio && playerData.audio.names) {
+      audioNames = playerData.audio.names.filter(function(n) { return n && n !== 'delete'; });
+    }
+
+    var subtitles = [];
+    if (playerData.cc && Array.isArray(playerData.cc)) {
+      subtitles = playerData.cc.map(function(c) { return { label: c.name || '', url: c.url || '' }; }).filter(function(s) { return s.url; });
+    }
+
+    return new Response(JSON.stringify({
+      url: hlsUrl,
+      quality: quality,
+      audioNames: audioNames,
+      subtitles: subtitles
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+}
+
 function parseMakePlayer(html) {
   var find = html.replace(/\n/g, '').match(/makePlayer\(\{([\s\S]*?)\}\);?/);
   if (!find) return null;
@@ -1561,7 +1669,7 @@ async function handleParseM3u8(encodedUrl, corsHeaders) {
       });
     }
     var text = await resp.text();
-    var levels = parseM3u8Levels(text);
+    var levels = parseM3u8Levels(text, m3u8Url);
     return new Response(JSON.stringify({ levels: levels, raw: text }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
@@ -1572,22 +1680,27 @@ async function handleParseM3u8(encodedUrl, corsHeaders) {
   }
 }
 
-function parseM3u8Levels(text) {
+function parseM3u8Levels(text, baseUrl) {
   if (!text) return [];
   var lines = text.split('\n');
   var levels = [];
+  var base = baseUrl ? baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) : '';
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
     if (line.indexOf('#EXT-X-STREAM-INF:') === 0) {
       var bwMatch = line.match(/BANDWIDTH=(\d+)/);
       var resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+      var nameMatch = line.match(/NAME="([^"]+)"/);
       var nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
       if (nextLine && nextLine.indexOf('#') !== 0) {
+        var url = nextLine;
+        if (url.indexOf('http') !== 0) url = base + url;
         levels.push({
           bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
           width: resMatch ? parseInt(resMatch[1]) : 0,
           height: resMatch ? parseInt(resMatch[2]) : 0,
-          url: nextLine
+          name: nameMatch ? nameMatch[1] : '',
+          url: url
         });
       }
     }
