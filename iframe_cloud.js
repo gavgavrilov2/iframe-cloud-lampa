@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.77.16');
+  console.log('[MovieZone] Loading v5.77.18');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -333,17 +333,13 @@
         };
 
         addToHistory(movie);
+      }
 
-    try { Lampa.Player.clear(); } catch(e) { debugLog('warn', 'Player.clear failed', { error: e.message }); }
-    try { Lampa.Player.stop(); } catch(e) { debugLog('warn', 'Player.stop failed', { error: e.message }); }
-        setTimeout(function() {
-          try { Lampa.Player.play(video); } catch(e) {}
-          try { Lampa.Player.playlist([video]); } catch(e) {}
-          try { Lampa.Player.open(); } catch(e) {}
-        }, 50);
+      Lampa.Player.play(video);
+      Lampa.Player.playlist([video]);
+      setupPlayerBack();
 
-        setupPlayerBack();
-
+      if (video.timeline) {
         setTimeout(function() {
           var el = document.querySelector('video');
           if (!el) return;
@@ -354,10 +350,10 @@
             if (now - lastSave < 3000) return;
             if (!el.duration || el.duration < 10) return;
             lastSave = now;
-            timeline.time = Math.round(el.currentTime);
-            timeline.duration = Math.round(el.duration);
-            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-            Lampa.Timeline.update(timeline);
+            video.timeline.time = Math.round(el.currentTime);
+            video.timeline.duration = Math.round(el.duration);
+            video.timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+            Lampa.Timeline.update(video.timeline);
           };
 
           el.addEventListener('timeupdate', savePos);
@@ -365,20 +361,15 @@
           el.addEventListener('ended', savePos);
 
           var doRestore = function() {
-            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-              el.currentTime = timeline.time;
-              Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+            if (video.timeline.time > 10 && el.duration && el.duration > video.timeline.time) {
+              el.currentTime = video.timeline.time;
+              Lampa.Noty.show(PLUGIN_NAME + ': \u043f\u043e\u0437\u0438\u0446\u0438\u044f \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u0441 ' + Math.floor(video.timeline.time / 60) + ':' + String(Math.floor(video.timeline.time % 60)).padStart(2, '0'));
             }
           };
 
           if (el.readyState >= 1) doRestore();
           else el.addEventListener('loadedmetadata', doRestore);
         }, 1500);
-      } else {
-        try { Lampa.Player.play(video); } catch(e) {}
-        try { Lampa.Player.playlist([video]); } catch(e) {}
-        try { Lampa.Player.open(); } catch(e) {}
-        setupPlayerBack();
       }
     }
 
@@ -745,14 +736,8 @@
 
     addToHistory(movie);
 
-    try { Lampa.Player.clear(); } catch(e) {}
-    try { Lampa.Player.stop(); } catch(e) {}
-    setTimeout(function() {
-      try { Lampa.Player.play(play); } catch(e) {}
-      try { Lampa.Player.playlist([play]); } catch(e) {}
-      try { Lampa.Player.open(); } catch(e) {}
-    }, 50);
-
+    Lampa.Player.play(play);
+    Lampa.Player.playlist([play]);
     setupPlayerBack();
 
     setTimeout(function() {
@@ -867,7 +852,6 @@
   function playKinogoEmbed(embedUrl, result, movie) {
     var multiUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
 
-
     var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
 
     fetchJson(infoUrl).then(function(info) {
@@ -878,122 +862,48 @@
 
       var masterUrl = info.m3u8 ? (WORKER_URL + info.m3u8) : multiUrl;
 
-      debugLog('info', 'playKinogoEmbed: fetching master m3u8', { url: masterUrl.substring(0, 80) + '...' });
+      debugLog('info', 'playKinogoEmbed: using master m3u8', { url: masterUrl.substring(0, 80) + '...' });
 
-      return fetchText(masterUrl).then(function(m3u8Text) {
-        var vercelPattern = 'iframe-cloud-proxy.vercel.app/api/proxy?url=';
-        var workerPattern = WORKER_URL.substring(8) + '/?proxy=';
+      var videoUrl = masterUrl;
 
-        if (m3u8Text.indexOf('iframe-cloud-proxy.vercel.app') !== -1) {
-          m3u8Text = m3u8Text.replace(/https:\/\/iframe-cloud-proxy\.vercel\.app\/api\/proxy\?url=/g, WORKER_URL + '/?proxy=');
-          debugLog('info', 'playKinogoEmbed: rewrote Vercel→Worker proxy URLs in m3u8');
-        }
+      var play = {
+        url: videoUrl,
+        type: 'm3u8',
+        title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
+        subtitles: [],
+        translate: tracks.length ? { tracks: tracks } : undefined
+      };
 
-        var blob = new Blob([m3u8Text], { type: 'application/vnd.apple.mpegurl' });
-        var videoUrl = URL.createObjectURL(blob);
-        debugLog('info', 'playKinogoEmbed: blob URL created', { videoUrl: videoUrl.substring(0, 60) + '...' });
+      var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
+      if (firstSubs) {
+        play.subtitles = parseSubtitles(firstSubs);
+      }
 
-        var play = {
-          url: videoUrl,
-          type: 'm3u8',
-          title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
-          subtitles: [],
-          translate: tracks.length ? { tracks: tracks } : undefined
-        };
+      var hash = getTimelineHash(movie, 'Kinogo');
+      var timeline = Lampa.Timeline.view(hash);
+      play.timeline = timeline;
 
-        var firstSubs = (info.tracks && info.tracks[0] && info.tracks[0].subtitles) || '';
-        if (firstSubs) {
-          play.subtitles = parseSubtitles(firstSubs);
-        }
+      var beholdHash = getBeholdHash(movie, 'Kinogo');
+      markViewed(beholdHash);
 
-        var hash = getTimelineHash(movie, 'Kinogo');
-        var timeline = Lampa.Timeline.view(hash);
-        play.timeline = timeline;
+      window._iframe_cloud_current = {
+        timeline: timeline,
+        beholdHash: beholdHash,
+        movie: movie,
+        label: 'Kinogo'
+      };
 
-        var beholdHash = getBeholdHash(movie, 'Kinogo');
-        markViewed(beholdHash);
+      addToHistory(movie);
 
-        window._iframe_cloud_current = {
-          timeline: timeline,
-          beholdHash: beholdHash,
-          movie: movie,
-          label: 'Kinogo'
-        };
+      Lampa.Player.play(play);
+      Lampa.Player.playlist([play]);
+      setupPlayerBack();
 
-        addToHistory(movie);
+      setTimeout(function() {
+        var el = document.querySelector('video');
+        if (!el) return;
 
-        var kinogoUrl = play.url;
-
-        try { Lampa.Player.clear(); } catch(e) {}
-        try { Lampa.Player.stop(); } catch(e) {}
-
-        var dummyPlay = {
-          url: 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAhtZGF0AAAA1m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidWR0YQAAAFptZGF0AAAAEgFAAIEEAAIBAgIABggCAAKCwkJCRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbA==',
-          type: 'mp4',
-          title: play.title
-        };
-
-        setTimeout(function() {
-          debugLog('log', 'playKinogoEmbed: opening player UI with dummy');
-          try { Lampa.Player.play(dummyPlay); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.play error', { error: e.message }); }
-          try { Lampa.Player.playlist([dummyPlay]); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.playlist error', { error: e.message }); }
-          try { Lampa.Player.open(); } catch(e) { debugLog('error', 'playKinogoEmbed: Player.open error', { error: e.message }); }
-        }, 50);
-
-        setTimeout(function() {
-          if (typeof Hls === 'undefined') {
-            debugLog('error', 'playKinogoEmbed: Hls not available globally');
-            return;
-          }
-
-          var el = document.querySelector('video');
-          if (!el) {
-            debugLog('error', 'playKinogoEmbed: no <video> element found');
-            return;
-          }
-
-          debugLog('info', 'playKinogoEmbed: attaching our hls.js', { url: kinogoUrl.substring(0, 80) });
-
-          try {
-            if (window._iframe_cloud_hls_kinogo) {
-              window._iframe_cloud_hls_kinogo.destroy();
-              window._iframe_cloud_hls_kinogo = null;
-            }
-          } catch(e) {}
-
-          var hls = createProxiedHls(['cinemap.cc', 'v206.cinemap.cc', 'iframe-cloud-proxy.vercel.app']);
-
-          hls.loadSource(kinogoUrl);
-          hls.attachMedia(el);
-
-          hls.on(Hls.Events.MANIFEST_PARSED, function() {
-            debugLog('info', 'playKinogoEmbed: hls.js MANIFEST_PARSED');
-            el.play().catch(function(e) {
-              debugLog('warn', 'playKinogoEmbed: autoplay blocked', { error: e.message });
-            });
-          });
-
-          hls.on(Hls.Events.ERROR, function(event, data) {
-            debugLog('error', 'playKinogoEmbed: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
-            if (data.fatal) {
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                hls.startLoad();
-              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                hls.recoverMediaError();
-              }
-            }
-          });
-
-          window._iframe_cloud_hls_kinogo = hls;
-        }, 1500);
-
-        setupPlayerBack();
-
-        setTimeout(function() {
-          var el = document.querySelector('video');
-          if (!el) return;
-
-          var lastSave = 0;
+        var lastSave = 0;
         var savePos = function() {
           var now = Date.now();
           if (now - lastSave < 3000) return;
@@ -1020,7 +930,6 @@
         else el.addEventListener('loadedmetadata', doRestore);
       }, 1500);
 
-      });
     }).catch(function(e) {
       console.log('[iframe-cloud] Kinogo info error:', e.message);
       Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — ' + e.message);
@@ -1204,15 +1113,20 @@
           return { label: c.name, url: c.url };
         }).filter(function(s) { return s.url; });
 
+        function collapseProxy(url) {
+          return WORKER_URL + '/?proxy=' + encodeURIComponent(url);
+        }
+
         if (isTv && data.seasons && data.seasons.length) {
           var allEpisodes = [];
           data.seasons.forEach(function(season) {
             (season.episodes || []).forEach(function(ep) {
+              var epUrl = ep.hls || ep.dash;
               allEpisodes.push({
                 season: season.season,
                 episode: ep.episode,
                 title: ep.title || ('S' + season.season + 'E' + ep.episode),
-                url: ep.hls || ep.dash,
+                url: epUrl ? collapseProxy(epUrl) : null,
                 quality: ep.hls ? '720p HLS' : '1080p DASH',
                 audio: ep.audio && ep.audio.length ? ep.audio : audioNames
               });
@@ -1230,8 +1144,8 @@
           return;
         }
 
-        window._iframe_cloud_collaps_hls_url = streamUrl;
-        var qualityLabel = '720p HLS';
+        streamUrl = collapseProxy(streamUrl);
+        var qualityLabel = data.hls ? '720p HLS' : '1080p DASH';
 
         debugLog('info', 'playCollapsStream: starting', {
           streamUrl: streamUrl.substring(0, 80) + '...',
@@ -1252,19 +1166,14 @@
   function playCollapsStream(url, qualityLabel, title, movie, audioNames, subtitles) {
     var label = 'Collaps ' + qualityLabel;
 
-    var playType = 'm3u8';
-
     debugLog('info', 'playCollapsStream: creating video object', {
       url: url.substring(0, 80) + '...',
-      type: playType,
       label: label
     });
 
-    var dummyUrl = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAhtZGF0AAAA1m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidWR0YQAAAFptZGF0AAAAEgFAAIEEAAIBAgIABggCAAKCwkJCRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbA==';
-
     var video = {
-      url: dummyUrl,
-      type: 'mp4',
+      url: url,
+      type: 'm3u8',
       title: PLUGIN_NAME + ' ' + label + ' — ' + title,
       subtitles: subtitles.length ? subtitles : [],
       translate: audioNames.length ? {
@@ -1290,74 +1199,10 @@
       addToHistory(movie);
     }
 
-    try { Lampa.Player.clear(); } catch(e) {}
-    try { Lampa.Player.stop(); } catch(e) {}
-
-    setTimeout(function() {
-      debugLog('log', 'playCollapsStream: opening player UI with dummy');
-      try { Lampa.Player.play(video); } catch(e) { debugLog('error', 'playCollapsStream: Player.play error', { error: e.message }); }
-      try { Lampa.Player.playlist([video]); } catch(e) { debugLog('error', 'playCollapsStream: Player.playlist error', { error: e.message }); }
-      try { Lampa.Player.open(); } catch(e) { debugLog('error', 'playCollapsStream: Player.open error', { error: e.message }); }
-    }, 50);
-
-    setTimeout(function() {
-      if (typeof Hls === 'undefined') {
-        debugLog('error', 'playCollapsStream: Hls not available globally');
-        return;
-      }
-
-      var el = document.querySelector('video');
-      if (!el) {
-        debugLog('error', 'playCollapsStream: no <video> element found');
-        return;
-      }
-
-      debugLog('info', 'playCollapsStream: attaching our hls.js', { url: url.substring(0, 80) });
-
-      try {
-        if (window._iframe_cloud_hls) {
-          window._iframe_cloud_hls.destroy();
-          window._iframe_cloud_hls = null;
-        }
-      } catch(e) {}
-
-      var hls = createProxiedHls(['interkh.com', 'cinemap.cc']);
-
-      hls.loadSource(url);
-      hls.attachMedia(el);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, function() {
-        debugLog('info', 'playCollapsStream: hls.js MANIFEST_PARSED');
-        el.play().catch(function(e) {
-          debugLog('warn', 'playCollapsStream: autoplay blocked', { error: e.message });
-        });
-      });
-
-      hls.on(Hls.Events.ERROR, function(event, data) {
-        debugLog('error', 'playCollapsStream: hls.js error', { type: data.type, details: data.details, fatal: data.fatal });
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            debugLog('info', 'playCollapsStream: hls.js network error, starting load');
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            debugLog('info', 'playCollapsStream: hls.js media error, recovering');
-            hls.recoverMediaError();
-          }
-        }
-      });
-
-      window._iframe_cloud_hls = hls;
-    }, 1500);
-
-    setTimeout(function() {
-      if (typeof Lampa.Player.off === 'function') {
-        Lampa.Player.off('error', onError);
-      }
-    }, 5000);
-
+    Lampa.Player.play(video);
+    Lampa.Player.playlist([video]);
     setupPlayerBack();
 
-    // Position save/restore
     if (video.timeline) {
       setTimeout(function() {
         var el = document.querySelector('video');
@@ -1760,10 +1605,9 @@
               play.timeline = timeline;
 
               addToHistory(movie);
-              try { Lampa.Player.stop(); } catch(e) {}
-              try { Lampa.Player.play(play); } catch(e) {}
-              try { Lampa.Player.playlist([play]); } catch(e) {}
-              try { Lampa.Player.open(); } catch(e) {}
+              Lampa.Player.play(play);
+              Lampa.Player.playlist([play]);
+              setupPlayerBack();
               done(true);
             }).catch(function() { done(false); });
           }).catch(function() { done(false); });

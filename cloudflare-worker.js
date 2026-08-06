@@ -221,21 +221,26 @@ async function handleProxy(targetUrl, corsHeaders, request) {
     if (targetUrl.startsWith('//')) targetUrl = 'https:' + targetUrl;
     var target = new URL(targetUrl);
     var referer = target.origin + '/';
+    var isCollapsCdn = target.hostname.indexOf('interkh.com') !== -1;
     var reqHeaders = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': referer,
-        'Origin': target.origin,
-        'Sec-Ch-Ua': '"Google Chrome";v="136", "Chromium";v="136"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'video',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'cross-site',
-        'Cache-Control': 'max-age=0'
+        'Accept-Encoding': 'gzip, deflate, br'
     };
+    if (isCollapsCdn) {
+      reqHeaders['Referer'] = 'https://kinokrad.my/';
+    } else {
+      reqHeaders['Referer'] = referer;
+      reqHeaders['Origin'] = target.origin;
+      reqHeaders['Sec-Ch-Ua'] = '"Google Chrome";v="136", "Chromium";v="136"';
+      reqHeaders['Sec-Ch-Ua-Mobile'] = '?0';
+      reqHeaders['Sec-Ch-Ua-Platform'] = '"Windows"';
+      reqHeaders['Sec-Fetch-Dest'] = 'video';
+      reqHeaders['Sec-Fetch-Mode'] = 'no-cors';
+      reqHeaders['Sec-Fetch-Site'] = 'cross-site';
+      reqHeaders['Cache-Control'] = 'max-age=0';
+    }
     if (request && request.headers) {
       var range = request.headers.get('Range');
       if (range) reqHeaders['Range'] = range;
