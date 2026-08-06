@@ -1615,17 +1615,6 @@
       });
     }
 
-    // 3. Collaps Direct — 1080p DASH
-    sources.push({
-      name: 'Collaps',
-      try: function(done) {
-        if (!kpId) { done(false); return; }
-        playCollapsDirect(kpId, title, movie).then(function() {
-          done(true);
-        }).catch(function() { done(false); });
-      }
-    });
-
     // Try each source sequentially
     tryNextSource(sources, 0);
 
@@ -1676,14 +1665,8 @@
             _source: 'vk'
           },
           {
-            title: 'Collaps',
-            subtitle: '1080p DASH / 720p HLS',
-            icon: '🎥',
-            _source: 'collaps'
-          },
-          {
             title: 'Авто (Auto-fallback)',
-            subtitle: 'Kinogo → VK → Collaps',
+            subtitle: 'Kinogo → VK',
             icon: '🤖',
             _source: 'auto'
           }
@@ -1703,14 +1686,6 @@
                 return;
               }
               searchAndPlayVk(movie);
-            } else if (source === 'collaps') {
-              Lampa.Loading.start('MovieZone');
-              playCollapsDirect(kpId, title, movie).then(function() {
-                Lampa.Loading.stop();
-              }).catch(function(e) {
-                Lampa.Loading.stop();
-                Lampa.Noty.show(PLUGIN_NAME + ': Collaps — ' + e.message);
-              });
             } else if (source === 'auto') {
               trySourceChain(movie, kpId);
             }
