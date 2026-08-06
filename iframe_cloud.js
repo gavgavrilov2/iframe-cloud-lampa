@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.80.1');
+  console.log('[MovieZone] Loading v5.80.2');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -481,7 +481,7 @@
       close();
       addToHistory(movie);
       debugLog('info', 'manual URL input', { url: url.substring(0, 80) });
-      playIframeCloudVideo({ url: url, audioNames: [], subtitles: [] }, title, movie);
+      playDirectM3u8(url, title, movie);
     });
 
     urlInput.on('keydown', function(e) {
@@ -547,6 +547,19 @@
     $('body').append(dialog);
 
     setTimeout(function() { urlInput.focus(); }, 100);
+  }
+
+  function playDirectM3u8(url, title, movie) {
+    var play = {
+      url: url,
+      type: 'm3u8',
+      title: PLUGIN_NAME + ' — ' + title
+    };
+
+    debugLog('info', 'playDirectM3u8: playing directly', { url: url.substring(0, 100) });
+
+    Lampa.Player.play(play);
+    Lampa.Player.runMod && Lampa.Player.runMod('pause', false);
   }
 
   function playIframeCloudVideo(data, title, movie) {
@@ -2022,7 +2035,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.80.1', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
+      type: 'video', version: '5.80.2', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
