@@ -1434,9 +1434,10 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders, debug) {
     var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
     var m;
     while ((m = re.exec(cloudHtml)) !== null) {
-      players.push({ name: m[2].trim(), url: m[1] });
+      var rawUrl = m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+      players.push({ name: m[2].trim(), url: rawUrl });
     }
-    log.push('players=' + JSON.stringify(players.map(function(p) { return { name: p.name, url: p.url.substring(0, 80) }; })));
+    log.push('players=' + JSON.stringify(players.map(function(p) { return { name: p.name, url: p.url.substring(0, 150) }; })));
     if (!players.length) {
       return new Response(JSON.stringify({ error: 'No players found', debug: log }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -1455,7 +1456,7 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders, debug) {
     for (var pi = 0; pi < players.length; pi++) {
       var playerUrl = players[pi].url;
       if (playerUrl.indexOf('veoveo') !== -1 || playerUrl.indexOf('tazaromikaz') !== -1) { log.push('skip_' + pi + '=' + players[pi].name); continue; }
-      log.push('try_player_' + pi + '=' + playerUrl.substring(0, 80));
+      log.push('try_player_' + pi + '=' + playerUrl.substring(0, 150));
       try {
         var embedHeaders = {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -1492,7 +1493,7 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders, debug) {
         var tryUrls = transformedUrl ? [transformedUrl, hlsUrl] : [hlsUrl];
 
         for (var ui = 0; ui < tryUrls.length; ui++) {
-          log.push('try_url_' + pi + '_' + ui + '=' + tryUrls[ui].substring(0, 120));
+          log.push('try_url_' + pi + '_' + ui + '=' + tryUrls[ui].substring(0, 150));
           try {
             var fetchResp = await fetch(tryUrls[ui], {
               headers: {
@@ -1502,7 +1503,7 @@ async function handleIframeCloudSuperdupercdn(kpId, corsHeaders, debug) {
               },
               redirect: 'follow'
             });
-            log.push('fetch_status_' + pi + '_' + ui + '=' + fetchResp.status + ' url=' + (fetchResp.url || '').substring(0, 120));
+            log.push('fetch_status_' + pi + '_' + ui + '=' + fetchResp.status + ' url=' + (fetchResp.url || '').substring(0, 150));
             if (!fetchResp.ok) continue;
 
             var body = await fetchResp.text();
@@ -1551,7 +1552,8 @@ async function handleIframeCloudPlay(kpId, playerUrl, corsHeaders) {
       var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
       var m;
       while ((m = re.exec(cloudHtml)) !== null) {
-        players.push({ name: m[2].trim(), url: m[1] });
+        var rawUrl = m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+        players.push({ name: m[2].trim(), url: rawUrl });
       }
       if (!players.length) {
         return new Response(JSON.stringify({ error: 'No players found' }), {
@@ -1771,7 +1773,8 @@ async function handleIframeCloudKp(kpId, corsHeaders) {
     var re = /data-value="([^"]+)"[^>]*onclick="selectItem\(this\)">\s*([^<]+)/g;
     var m;
     while ((m = re.exec(html)) !== null) {
-      players.push({ name: m[2].trim(), url: m[1] });
+      var rawUrl = m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+      players.push({ name: m[2].trim(), url: rawUrl });
     }
     return new Response(JSON.stringify({ players: players }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
