@@ -1183,8 +1183,11 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
     }
 
-    lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + audioVariant.bandwidth + ',RESOLUTION=' + audioVariant.resolution + ',AUDIO="audio"');
-    lines.push(audioVariant.url);
+    for (var q = 0; q < variants.length; q++) {
+      var variant = variants[q];
+      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + ',CODECS="avc1.4d401f,mp4a.40.2",AUDIO="audio"');
+      lines.push(variant.url);
+    }
 
     lines.push('#EXT-X-ENDLIST');
     return new Response(lines.join('\n'), {
