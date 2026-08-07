@@ -1433,6 +1433,18 @@
 
   var _playerBackKeyHandler = null;
 
+  function goBackToCard() {
+    try {
+      if (typeof Lampa.Activity !== 'undefined' && typeof Lampa.Activity.backward === 'function') {
+        Lampa.Activity.backward();
+      } else {
+        Lampa.Controller.toggle('content');
+      }
+    } catch (err) {
+      try { Lampa.Controller.toggle('content'); } catch (e) {}
+    }
+  }
+
   function setupPlayerBack() {
     if (_playerBackKeyHandler) {
       document.removeEventListener('keydown', _playerBackKeyHandler);
@@ -1441,7 +1453,7 @@
     _playerBackKeyHandler = function(e) {
       if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
         try { Lampa.Player.close(); } catch (err) {}
-        try { Lampa.Controller.toggle('content'); } catch (err) {}
+        try { goBackToCard(); } catch (err) {}
       }
     };
 
@@ -1452,7 +1464,7 @@
       try {
         if (Lampa.Player && typeof Lampa.Player.on === 'function') {
           Lampa.Player.on('close', function() {
-            try { Lampa.Controller.toggle('content'); } catch (err) {}
+            try { goBackToCard(); } catch (err) {}
           });
         }
       } catch (err) {}
@@ -1699,7 +1711,7 @@
         }
       },
       onBack: function() {
-        Lampa.Controller.toggle('content');
+        goBackToCard();
       }
     });
   }
@@ -2135,7 +2147,7 @@
             }
           },
           onBack: function() {
-            Lampa.Controller.toggle('content');
+            goBackToCard();
           }
         });
       })

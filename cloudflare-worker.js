@@ -1183,11 +1183,8 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
     }
 
-    for (var q = 0; q < variants.length; q++) {
-      var variant = variants[q];
-      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + ',CODECS="avc1.4d401f,mp4a.40.2",AUDIO="audio"');
-      lines.push(variant.url);
-    }
+    lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + audioVariant.bandwidth + ',RESOLUTION=' + audioVariant.resolution + ',AUDIO="audio"');
+    lines.push(audioVariant.url);
 
     lines.push('#EXT-X-ENDLIST');
     return new Response(lines.join('\n'), {
@@ -1229,12 +1226,11 @@ function parseVariantsFromM3u8(m3u8) {
 }
 
 function replaceVariantSuffix(url, newSuffix) {
-  var workerOrigin = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var match = url.match(/url=([^&]+)/);
   if (match) {
     var originalUrl = decodeURIComponent(match[1]);
     originalUrl = originalUrl.replace(/\.m3u8$/, newSuffix + '.m3u8');
-    return workerOrigin + '/?proxy=' + encodeURIComponent(originalUrl);
+    return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
   }
   return url.replace(/\.m3u8$/, newSuffix + '.m3u8');
 }
