@@ -1065,15 +1065,12 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
     }
 
     var tracks = [];
-    var firstFile = null;
     for (var i = 0; i < playlist.length; i++) {
       var item = playlist[i];
       if (!item.file) continue;
       var voiceName = item.title || 'Voice ' + (i + 1);
       voiceName = voiceName.replace(/<[^>]+>/g, '').replace(/,/g, ' ').trim();
       if (!voiceName) voiceName = 'Voice ' + (i + 1);
-
-      if (!firstFile) firstFile = item.file;
 
       tracks.push({
         name: voiceName,
@@ -1083,19 +1080,7 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
       });
     }
 
-    var encodedEmbed = embedUrl;
-    try { encodedEmbed = encodeURIComponent(embedUrl); } catch(e) {}
-    var m3u8Path = '/kinogo/' + encodedEmbed + '/master.m3u8';
-
-    var directM3u8 = null;
-    if (firstFile) {
-      var fileUrl = firstFile;
-      if (fileUrl.startsWith('//')) fileUrl = 'https:' + fileUrl;
-    var workerBase = request ? new URL(request.url).origin + '/?proxy=' : 'https://silent-recipe-5c08.rustypony.workers.dev/?proxy=';
-      directM3u8 = workerBase + encodeURIComponent(fileUrl);
-    }
-
-    return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path, directM3u8: directM3u8 }), {
+    return new Response(JSON.stringify({ tracks: tracks }), {
       status: 200, headers: corsHeaders
     });
   } catch (e) {
@@ -1108,8 +1093,6 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
 async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
-
-    var workerBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
 
     var embedResult = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
     var html = embedResult.text;
@@ -1140,7 +1123,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       var voiceUrl = item.file;
       if (voiceUrl.indexOf('http') !== 0) voiceUrl = 'https:' + voiceUrl;
       try { voiceUrl = decodeURIComponent(voiceUrl); } catch(e) {}
-      voices.push({ name: voiceName, url: voiceUrl });
+      voices.push({ name: voiceName, url: voiceUrl, subtitles: item.subtitle || '' });
     }
 
     if (!voices.length) {
@@ -1150,41 +1133,14 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
-    var firstMasterVercel = workerBase + encodeURIComponent(voices[0].url);
-    var variantResp = await fetch(firstMasterVercel);
-    var variantM3u8 = await variantResp.text();
-    var variants = parseVariantsFromM3u8(variantM3u8);
-
-    var voiceSuffixes = [''];
-    for (var v = 1; v < voices.length; v++) {
-      var hm = voices[v].url.match(/hls(-[^.]+)\.m3u8$/);
-      voiceSuffixes.push(hm ? hm[1] : '');
-    }
-
-    if (!variants.length) {
-      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
-        status: 200,
-        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/vnd.apple.mpegurl' }
-      });
-    }
-
-    var audioVariant = variants[0];
-    for (var q = 1; q < variants.length; q++) {
-      if (variants[q].bandwidth > audioVariant.bandwidth) audioVariant = variants[q];
-    }
-
     var lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
 
     for (var v = 0; v < voices.length; v++) {
       var voice = voices[v];
-      var defaultAttr = v === 0 ? ',DEFAULT=YES' : '';
-      var autoSelect = v === 0 ? ',AUTOSELECT=YES' : '';
-      var audioUrl = replaceVariantSuffix(audioVariant.url, voiceSuffixes[v]);
-      lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
+      var proxiedUrl = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(voice.url);
+      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080');
+      lines.push(proxiedUrl);
     }
-
-    lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + audioVariant.bandwidth + ',RESOLUTION=' + audioVariant.resolution + ',AUDIO="audio"');
-    lines.push(audioVariant.url);
 
     lines.push('#EXT-X-ENDLIST');
     return new Response(lines.join('\n'), {
