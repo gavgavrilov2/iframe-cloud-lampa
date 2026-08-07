@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  console.log('[MovieZone] Loading v5.81.0');
+  console.log('[MovieZone] Loading v5.82.0');
 
   var PLUGIN_NAME = 'MovieZone';
     var WORKER_URL = 'https://silent-recipe-5c08.rustypony.workers.dev';
@@ -485,7 +485,7 @@
     Lampa.Noty.show(PLUGIN_NAME + ': ищем видео...');
 
     var iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:#000;border:none;';
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;border:none;';
     iframe.setAttribute('allow', 'autoplay; fullscreen');
     iframe.src = embedUrl;
     document.body.appendChild(iframe);
@@ -493,31 +493,14 @@
     var cleaned = false;
     var found = false;
 
-    var closeBtn = document.createElement('div');
-    closeBtn.textContent = '\u2715 Закрыть';
-    closeBtn.style.cssText = 'position:fixed;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;';
-    document.body.appendChild(closeBtn);
-
-    var hint = document.createElement('div');
-    hint.textContent = 'MovieZone: ищем m3u8...';
-    hint.style.cssText = 'position:fixed;top:10px;left:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#0f0;padding:8px 16px;border-radius:6px;font-size:12px;font-family:monospace;';
-    document.body.appendChild(hint);
-
     function cleanup() {
       if (cleaned) return;
       cleaned = true;
       try { iframe.remove(); } catch(e) {}
-      try { closeBtn.remove(); } catch(e) {}
-      try { hint.remove(); } catch(e) {}
       try { observer.disconnect(); } catch(e) {}
       clearInterval(checkInterval);
       clearTimeout(timeout);
     }
-
-    closeBtn.onclick = function() {
-      cleanup();
-      showIframeCloudDialog(kpId, title, movie);
-    };
 
     var observer = null;
     try {
@@ -544,8 +527,6 @@
       }
 
       debugLog('info', 'autoDetect: FOUND m3u8!', { url: url.substring(0, 150) });
-      hint.textContent = 'MovieZone: НАШЕЛ! ' + url.substring(0, 60) + '...';
-      hint.style.background = 'rgba(0,100,0,0.9)';
 
       found = true;
       setTimeout(function() {
@@ -560,22 +541,12 @@
       checkCount++;
 
       var entries = performance.getEntriesByType('resource');
-      var m3u8Entries = [];
       for (var i = 0; i < entries.length; i++) {
-        if (entries[i].name.indexOf('.m3u8') !== -1) {
-          m3u8Entries.push(entries[i].name);
-        }
         checkEntry(entries[i]);
       }
 
-      hint.textContent = 'MovieZone: check #' + checkCount + ' | res: ' + entries.length + ' | m3u8: ' + m3u8Entries.length;
-
-      if (m3u8Entries.length > 0) {
-        debugLog('debug', 'autoDetect: m3u8 entries found but blocked', { urls: m3u8Entries });
-      }
-
-      if (checkCount % 10 === 0) {
-        debugLog('debug', 'autoDetect: check #' + checkCount, { entries: entries.length, m3u8: m3u8Entries.length });
+      if (checkCount % 5 === 0) {
+        debugLog('debug', 'autoDetect: check #' + checkCount, { entries: entries.length });
       }
     }, 2000);
 
@@ -589,7 +560,6 @@
 
     iframe.onload = function() {
       debugLog('debug', 'autoDetect: iframe loaded, waiting for player...');
-      hint.textContent = 'MovieZone: iframe загружен, ждём m3u8...';
     };
 
     iframe.onerror = function() {
@@ -1459,34 +1429,34 @@
     });
   }
 
-  /* ---- Back button handler for native player ---- */
+  /* ---- Back button handler for native player (deduplicated) ---- */
+
+  var _playerBackKeyHandler = null;
 
   function setupPlayerBack() {
-    var handler = function(e) {
+    if (_playerBackKeyHandler) {
+      document.removeEventListener('keydown', _playerBackKeyHandler);
+    }
+
+    _playerBackKeyHandler = function(e) {
       if (e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009) {
         try { Lampa.Player.close(); } catch (err) {}
         try { Lampa.Controller.toggle('content'); } catch (err) {}
       }
     };
-    
-    document.addEventListener('keydown', handler);
-    
-    var cleanupHandler = function() {
-      if (location.hash.includes('content') || !location.hash) {
-        document.removeEventListener('keydown', handler);
-        window.removeEventListener('hashchange', cleanupHandler);
-      }
-    };
-    
-    window.addEventListener('hashchange', cleanupHandler);
 
-    try {
-      if (Lampa.Player && typeof Lampa.Player.on === 'function') {
-        Lampa.Player.on('close', function() {
-          try { Lampa.Controller.toggle('content'); } catch (err) {}
-        });
-      }
-    } catch (err) {}
+    document.addEventListener('keydown', _playerBackKeyHandler);
+
+    if (!window._iframe_cloud_close_listener_added) {
+      window._iframe_cloud_close_listener_added = true;
+      try {
+        if (Lampa.Player && typeof Lampa.Player.on === 'function') {
+          Lampa.Player.on('close', function() {
+            try { Lampa.Controller.toggle('content'); } catch (err) {}
+          });
+        }
+      } catch (err) {}
+    }
   }
 
   /* ---- iframe fallback (for non-ortified players or failures) ---- */
@@ -2246,7 +2216,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.81.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
+      type: 'video', version: '5.82.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player with quality switching', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
