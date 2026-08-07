@@ -2274,7 +2274,7 @@
     window.iframe_cloud_plugin = true;
 
     Lampa.Manifest.plugins = {
-      type: 'video', version: '5.84.0', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player', component: 'iframe_cloud',
+      type: 'video', version: '5.84.2', name: PLUGIN_NAME, description: 'VK Video, Kinogo, iframe.cloud — native Lampa player', component: 'iframe_cloud',
       onContextMenu: function(obj) { return { name: 'Watch in ' + PLUGIN_NAME, description: '' }; },
       onContextLauch: function(obj) { openPlugin(obj); }
     };
