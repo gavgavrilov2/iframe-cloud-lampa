@@ -1091,8 +1091,8 @@ async function handleKinogoInfo(embedUrl, corsHeaders) {
     if (firstFile) {
       var fileUrl = firstFile;
       if (fileUrl.startsWith('//')) fileUrl = 'https:' + fileUrl;
-      var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
-      directM3u8 = vercelBase + encodeURIComponent(fileUrl);
+    var workerBase = request ? new URL(request.url).origin + '/?proxy=' : 'https://silent-recipe-5c08.rustypony.workers.dev/?proxy=';
+      directM3u8 = workerBase + encodeURIComponent(fileUrl);
     }
 
     return new Response(JSON.stringify({ tracks: tracks, m3u8: m3u8Path, directM3u8: directM3u8 }), {
@@ -1109,7 +1109,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
   try {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
-    var vercelBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
+    var workerBase = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=';
 
     var embedResult = await fetchViaVercelWithFallback(embedUrl, KINOGO_BASE + '/');
     var html = embedResult.text;
@@ -1150,7 +1150,7 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       });
     }
 
-    var firstMasterVercel = vercelBase + encodeURIComponent(voices[0].url);
+    var firstMasterVercel = workerBase + encodeURIComponent(voices[0].url);
     var variantResp = await fetch(firstMasterVercel);
     var variantM3u8 = await variantResp.text();
     var variants = parseVariantsFromM3u8(variantM3u8);
@@ -1183,11 +1183,8 @@ async function handleKinogoMulti(embedUrl, corsHeaders, request) {
       lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"' + defaultAttr + autoSelect + ',URI="' + audioUrl + '",NAME="' + voice.name + '"');
     }
 
-    for (var q = 0; q < variants.length; q++) {
-      var variant = variants[q];
-      lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + variant.bandwidth + ',RESOLUTION=' + variant.resolution + ',CODECS="avc1.4d401f,mp4a.40.2",AUDIO="audio"');
-      lines.push(variant.url);
-    }
+    lines.push('#EXT-X-STREAM-INF:BANDWIDTH=' + audioVariant.bandwidth + ',RESOLUTION=' + audioVariant.resolution + ',AUDIO="audio"');
+    lines.push(audioVariant.url);
 
     lines.push('#EXT-X-ENDLIST');
     return new Response(lines.join('\n'), {
@@ -1229,11 +1226,12 @@ function parseVariantsFromM3u8(m3u8) {
 }
 
 function replaceVariantSuffix(url, newSuffix) {
+  var workerOrigin = 'https://silent-recipe-5c08.rustypony.workers.dev';
   var match = url.match(/url=([^&]+)/);
   if (match) {
     var originalUrl = decodeURIComponent(match[1]);
     originalUrl = originalUrl.replace(/\.m3u8$/, newSuffix + '.m3u8');
-    return 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(originalUrl);
+    return workerOrigin + '/?proxy=' + encodeURIComponent(originalUrl);
   }
   return url.replace(/\.m3u8$/, newSuffix + '.m3u8');
 }
