@@ -1342,96 +1342,133 @@
     });
   }
 
+  function collectAllSubtitles(tracks) {
+    var seen = {};
+    var subs = [];
+    for (var i = 0; i < tracks.length; i++) {
+      var raw = tracks[i].subtitles || '';
+      if (!raw) continue;
+      var parts = raw.split(',');
+      for (var j = 0; j < parts.length; j++) {
+        var m = parts[j].match(/^\[(\w+)\](.+)$/);
+        var url = m ? m[2].trim() : parts[j].trim();
+        if (!url || seen[url]) continue;
+        seen[url] = true;
+        var label = m ? m[1] : 'Sub ' + (subs.length + 1);
+        var lang = m ? m[1] : '';
+        subs.push({ index: subs.length, label: label, language: lang, url: 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(url.startsWith('//') ? 'https:' + url : url), mode: 'disabled', selected: false });
+      }
+    }
+    return subs;
+  }
+
   function playKinogoEmbed(embedUrl, result, movie) {
-    var masterUrl = WORKER_URL + '/kinogo/' + encodeURIComponent(embedUrl) + '/master.m3u8';
     var infoUrl = WORKER_URL + '/?kinogo_info=' + encodeURIComponent(embedUrl);
 
     fetchJson(infoUrl).then(function(info) {
 
       var voiceTracks = (info.tracks || []).filter(function(t) { return t.file; });
 
-      var translateTracks = voiceTracks.map(function(t, i) {
-        return { language: t.name, label: t.name, index: i, extra: {} };
-      });
-
-      debugLog('info', 'playKinogoEmbed: using master m3u8', { voices: voiceTracks.length, url: masterUrl.substring(0, 80) + '...' });
-
-      var play = {
-        url: masterUrl,
-        type: 'm3u8',
-        title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
-        subtitles: [],
-        translate: translateTracks.length ? { tracks: translateTracks } : undefined
-      };
-
-      if (voiceTracks[0] && voiceTracks[0].subtitles) {
-        play.subtitles = parseSubtitles(voiceTracks[0].subtitles);
+      if (!voiceTracks.length) {
+        Lampa.Noty.show(PLUGIN_NAME + ': Kinogo — нет доступных голосов');
+        return;
       }
 
-      var hash = getTimelineHash(movie, 'Kinogo');
-      var timeline = Lampa.Timeline.view(hash);
-      play.timeline = timeline;
+      var allSubtitles = collectAllSubtitles(voiceTracks);
 
-      var beholdHash = getBeholdHash(movie, 'Kinogo');
-      markViewed(beholdHash);
+      function startPlayVoice(track) {
+        var voiceFile = track.file;
+        if (voiceFile.startsWith('//')) voiceFile = 'https:' + voiceFile;
+        var voiceUrl = 'https://iframe-cloud-proxy.vercel.app/api/proxy?url=' + encodeURIComponent(voiceFile);
 
-      window._iframe_cloud_current = {
-        timeline: timeline,
-        beholdHash: beholdHash,
-        movie: movie,
-        label: 'Kinogo'
-      };
+        debugLog('info', 'playKinogoEmbed: playing voice', { name: track.name, subs: allSubtitles.length });
 
-      addToHistory(movie);
+        var play = {
+          url: voiceUrl,
+          type: 'm3u8',
+          title: PLUGIN_NAME + ' Kinogo — ' + (result.title || '') + ' (' + (result.year || '') + ')',
+          subtitles: allSubtitles.length ? allSubtitles : []
+        };
 
-      Lampa.Player.play(play);
-      Lampa.Player.playlist([play]);
-      setupPlayerBack();
+        var hash = getTimelineHash(movie, 'Kinogo');
+        var timeline = Lampa.Timeline.view(hash);
+        play.timeline = timeline;
 
-      setTimeout(function() {
-        var el = document.querySelector('video');
-        if (!el) return;
+        var beholdHash = getBeholdHash(movie, 'Kinogo');
+        markViewed(beholdHash);
 
-        try {
-          if (window.Hls && window.Hls.instances) {
-            var hlsInstances = Object.keys(window.Hls.instances);
-            for (var hi = 0; hi < hlsInstances.length; hi++) {
-              var hls = window.Hls.instances[hlsInstances[hi]];
-              if (hls) {
-                hls.autoLevelCapping = 0;
-                hls.loadLevel = 0;
-                if (hls.currentLevel === -1) hls.currentLevel = 0;
+        window._iframe_cloud_current = {
+          timeline: timeline,
+          beholdHash: beholdHash,
+          movie: movie,
+          label: 'Kinogo'
+        };
+
+        addToHistory(movie);
+
+        Lampa.Player.play(play);
+        Lampa.Player.playlist([play]);
+        setupPlayerBack();
+
+        setTimeout(function() {
+          var el = document.querySelector('video');
+          if (!el) return;
+
+          try {
+            if (window.Hls && window.Hls.instances) {
+              var hlsInstances = Object.keys(window.Hls.instances);
+              for (var hi = 0; hi < hlsInstances.length; hi++) {
+                var hls = window.Hls.instances[hlsInstances[hi]];
+                if (hls) {
+                  hls.autoLevelCapping = 0;
+                  hls.loadLevel = 0;
+                  if (hls.currentLevel === -1) hls.currentLevel = 0;
+                }
               }
             }
-          }
-        } catch (hlsErr) {}
+          } catch (hlsErr) {}
 
-        var lastSave = 0;
-        var savePos = function() {
-          var now = Date.now();
-          if (now - lastSave < 3000) return;
-          if (!el.duration || el.duration < 10) return;
-          lastSave = now;
-          timeline.time = Math.round(el.currentTime);
-          timeline.duration = Math.round(el.duration);
-          timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
-          Lampa.Timeline.update(timeline);
-        };
+          var lastSave = 0;
+          var savePos = function() {
+            var now = Date.now();
+            if (now - lastSave < 3000) return;
+            if (!el.duration || el.duration < 10) return;
+            lastSave = now;
+            timeline.time = Math.round(el.currentTime);
+            timeline.duration = Math.round(el.duration);
+            timeline.percent = Math.min(100, Math.round((el.currentTime / el.duration) * 100));
+            Lampa.Timeline.update(timeline);
+          };
 
-        el.addEventListener('timeupdate', savePos);
-        el.addEventListener('pause', savePos);
-        el.addEventListener('ended', savePos);
+          el.addEventListener('timeupdate', savePos);
+          el.addEventListener('pause', savePos);
+          el.addEventListener('ended', savePos);
 
-        var doRestore = function() {
-          if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
-            el.currentTime = timeline.time;
-            Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
-          }
-        };
+          var doRestore = function() {
+            if (timeline.time > 10 && el.duration && el.duration > timeline.time) {
+              el.currentTime = timeline.time;
+              Lampa.Noty.show(PLUGIN_NAME + ': позиция восстановлена с ' + Math.floor(timeline.time / 60) + ':' + String(Math.floor(timeline.time % 60)).padStart(2, '0'));
+            }
+          };
 
-        if (el.readyState >= 1) doRestore();
-        else el.addEventListener('loadedmetadata', doRestore);
-      }, 2000);
+          if (el.readyState >= 1) doRestore();
+          else el.addEventListener('loadedmetadata', doRestore);
+        }, 2000);
+      }
+
+      if (voiceTracks.length > 1) {
+        var voiceItems = voiceTracks.map(function(t) {
+          return { title: t.name, _track: t };
+        });
+        Lampa.Select.show({
+          title: PLUGIN_NAME + ' — Озвучка',
+          items: voiceItems,
+          onSelect: function(item) { startPlayVoice(item._track); },
+          onBack: function() { goBackToCard(); }
+        });
+      } else {
+        startPlayVoice(voiceTracks[0]);
+      }
 
     }).catch(function(e) {
       console.log('[iframe-cloud] Kinogo info error:', e.message);
