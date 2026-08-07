@@ -629,10 +629,11 @@
 
   function autoDetectM3u8FromIframe(kpId, title, movie, onDone) {
     debugLog('info', 'autoDetectM3u8FromIframe: starting', { kpId: kpId });
-    Lampa.Loading.start('MovieZone: Поиск видео...');
+
+    Lampa.Noty.show(PLUGIN_NAME + ': ищем видео...');
 
     var iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;border:none;';
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;opacity:1;background:#000;border:none;';
     iframe.setAttribute('allow', 'autoplay; fullscreen');
     iframe.src = IFRAME_CLOUD_BASE + kpId;
     document.body.appendChild(iframe);
@@ -640,13 +641,25 @@
     var cleaned = false;
     var found = false;
 
+    var closeBtn = document.createElement('div');
+    closeBtn.textContent = '\u2715 Закрыть';
+    closeBtn.style.cssText = 'position:fixed;top:10px;right:10px;z-index:10000;background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;';
+    document.body.appendChild(closeBtn);
+
     function cleanup() {
       if (cleaned) return;
       cleaned = true;
       try { iframe.remove(); } catch(e) {}
+      try { closeBtn.remove(); } catch(e) {}
       try { observer.disconnect(); } catch(e) {}
       clearInterval(checkInterval);
+      clearTimeout(timeout);
     }
+
+    closeBtn.onclick = function() {
+      cleanup();
+      if (onDone) onDone(false);
+    };
 
     var observer = null;
     try {
@@ -666,48 +679,53 @@
       var url = entry.name || '';
       if (url.indexOf('.m3u8') === -1) return;
 
-      debugLog('info', 'autoDetectM3u8: found m3u8 in performance', { url: url.substring(0, 120) });
+      debugLog('info', 'autoDetectM3u8: found m3u8 in performance', { url: url.substring(0, 150) });
 
-      var blocked = ['apple.com', 'cloudflare.com', 'google.com', 'lampa.mx'];
+      var blocked = ['apple.com', 'cloudflare.com', 'google.com', 'lampa.mx', 'cloudflareinsights.com', 'metrika'];
       for (var b = 0; b < blocked.length; b++) {
         if (url.indexOf(blocked[b]) !== -1) return;
       }
 
       found = true;
       cleanup();
-      Lampa.Loading.stop();
-      debugLog('info', 'autoDetectM3u8: playing', { url: url.substring(0, 120) });
+      debugLog('info', 'autoDetectM3u8: playing', { url: url.substring(0, 150) });
       playDirectM3u8(url, title, movie);
       if (onDone) onDone(true);
     }
 
+    var checkCount = 0;
     var checkInterval = setInterval(function() {
       if (found) return;
+      checkCount++;
 
       var entries = performance.getEntriesByType('resource');
+      var m3u8Count = 0;
       for (var i = 0; i < entries.length; i++) {
+        if (entries[i].name.indexOf('.m3u8') !== -1) m3u8Count++;
         checkEntry(entries[i]);
+      }
+
+      if (checkCount % 5 === 0) {
+        debugLog('debug', 'autoDetectM3u8: check #' + checkCount, { entries: entries.length, m3u8: m3u8Count });
       }
     }, 2000);
 
     var timeout = setTimeout(function() {
       if (!found) {
         cleanup();
-        Lampa.Loading.stop();
-        debugLog('warn', 'autoDetectM3u8: timeout after 30s');
+        debugLog('warn', 'autoDetectM3u8: timeout after 45s, showing dialog');
+        showIframeCloudDialog(kpId, title, movie);
         if (onDone) onDone(false);
       }
-    }, 30000);
+    }, 45000);
 
     iframe.onload = function() {
-      debugLog('debug', 'autoDetectM3u8: iframe loaded');
+      debugLog('debug', 'autoDetectM3u8: iframe loaded, waiting for player...');
     };
 
     iframe.onerror = function() {
       debugLog('warn', 'autoDetectM3u8: iframe error');
       cleanup();
-      clearTimeout(timeout);
-      Lampa.Loading.stop();
       if (onDone) onDone(false);
     };
   }
